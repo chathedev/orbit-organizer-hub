@@ -20,6 +20,7 @@ interface RecordingViewProps {
 export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [interimTranscript, setInterimTranscript] = useState("");
   const [isGeneratingProtocol, setIsGeneratingProtocol] = useState(false);
   const recognitionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -47,16 +48,32 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       let final = '';
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
+        const transcriptText = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          final += transcript + ' ';
+          final += transcriptText + ' ';
         } else {
-          interim += transcript;
+          interim += transcriptText;
         }
       }
 
       if (final) {
         setTranscript(prev => prev + final);
+        setInterimTranscript('');
+      }
+      
+      if (interim) {
+        setInterimTranscript(interim);
+      }
+    };
+
+    recognition.onend = () => {
+      console.log('Recognition ended, restarting...');
+      if (isRecording && recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+        } catch (error) {
+          console.error('Error restarting recognition:', error);
+        }
       }
     };
 
@@ -120,6 +137,8 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   }, [toast, onBack]);
 
   const stopRecording = async () => {
+    setIsRecording(false);
+    
     if (recognitionRef.current) {
       recognitionRef.current.stop();
     }
@@ -129,9 +148,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       streamRef.current = null;
     }
     
-    setIsRecording(false);
-    
-    const fullTranscript = transcript;
+    const fullTranscript = transcript + interimTranscript;
     
     if (!fullTranscript.trim()) {
       toast({
@@ -213,9 +230,10 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
             <FileText className="w-5 h-5" />
             Transkription (realtid)
           </h2>
-          {transcript ? (
+          {transcript || interimTranscript ? (
             <p className="text-base text-muted-foreground leading-relaxed whitespace-pre-wrap">
               {transcript}
+              <span className="opacity-60">{interimTranscript}</span>
             </p>
           ) : (
             <p className="text-sm text-muted-foreground/60 italic">
