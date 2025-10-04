@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, Check, Loader2 } from "lucide-react";
+import { ArrowLeft, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
 import { saveAs } from "file-saver";
@@ -21,7 +22,8 @@ interface AutoProtocolGeneratorProps {
 
 export const AutoProtocolGenerator = ({ transcript, aiProtocol, onBack }: AutoProtocolGeneratorProps) => {
   const [isGenerating, setIsGenerating] = useState(true);
-  const [isComplete, setIsComplete] = useState(false);
+  const [documentBlob, setDocumentBlob] = useState<Blob | null>(null);
+  const [fileName, setFileName] = useState<string>("");
   const { toast } = useToast();
 
   useEffect(() => {
@@ -166,15 +168,15 @@ export const AutoProtocolGenerator = ({ transcript, aiProtocol, onBack }: AutoPr
         });
 
         const blob = await Packer.toBlob(doc);
-        const fileName = `Motesprotokoll_${dateStr}_${timeStr.replace(':', '-')}.docx`;
-        saveAs(blob, fileName);
-
+        const generatedFileName = `Motesprotokoll_${dateStr}_${timeStr.replace(':', '-')}.docx`;
+        
+        setDocumentBlob(blob);
+        setFileName(generatedFileName);
         setIsGenerating(false);
-        setIsComplete(true);
 
         toast({
           title: "Protokoll klart!",
-          description: `${fileName} har laddats ner automatiskt.`,
+          description: "Du kan nu se och ladda ner ditt protokoll.",
         });
       } catch (error) {
         console.error("Fel vid generering av protokoll:", error);
@@ -190,6 +192,20 @@ export const AutoProtocolGenerator = ({ transcript, aiProtocol, onBack }: AutoPr
     generateDocument();
   }, [transcript, aiProtocol, toast]);
 
+  const handleDownload = () => {
+    if (documentBlob && fileName) {
+      saveAs(documentBlob, fileName);
+      toast({
+        title: "Nedladdning startad!",
+        description: `${fileName} laddas ner nu.`,
+      });
+    }
+  };
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('sv-SE');
+  const timeStr = now.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
@@ -202,7 +218,7 @@ export const AutoProtocolGenerator = ({ transcript, aiProtocol, onBack }: AutoPr
             <div>
               <h1 className="text-2xl font-bold text-card-foreground">Mötesprotokoll</h1>
               <p className="text-sm text-muted-foreground mt-1">
-                {isGenerating ? "Genererar protokoll..." : "Protokoll nedladdat!"}
+                {isGenerating ? "Genererar protokoll..." : "Protokoll klart!"}
               </p>
             </div>
           </div>
@@ -210,9 +226,9 @@ export const AutoProtocolGenerator = ({ transcript, aiProtocol, onBack }: AutoPr
       </div>
 
       {/* Content */}
-      <div className="flex-1 flex flex-col items-center justify-center p-8">
+      <div className="flex-1 p-8">
         {isGenerating ? (
-          <div className="text-center space-y-6">
+          <div className="text-center space-y-6 max-w-4xl mx-auto">
             <Loader2 className="w-16 h-16 text-primary mx-auto animate-spin" />
             <div className="space-y-2">
               <h2 className="text-2xl font-bold text-card-foreground">
@@ -225,7 +241,7 @@ export const AutoProtocolGenerator = ({ transcript, aiProtocol, onBack }: AutoPr
 
             {/* Preview of AI content */}
             {aiProtocol && (
-              <div className="max-w-2xl mt-8 bg-card border border-border rounded-lg p-6 text-left space-y-4 animate-fade-in">
+              <div className="max-w-2xl mx-auto mt-8 bg-card border border-border rounded-lg p-6 text-left space-y-4 animate-fade-in">
                 <h3 className="font-semibold text-lg text-primary">{aiProtocol.title}</h3>
                 <p className="text-sm text-muted-foreground">{aiProtocol.summary}</p>
                 <div className="text-xs text-muted-foreground">
@@ -240,29 +256,103 @@ export const AutoProtocolGenerator = ({ transcript, aiProtocol, onBack }: AutoPr
               </div>
             )}
           </div>
-        ) : isComplete ? (
-          <div className="text-center space-y-6 animate-scale-in">
-            <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
-              <Check className="w-10 h-10 text-primary" />
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-3xl font-bold text-card-foreground">
-                Klart!
-              </h2>
-              <p className="text-muted-foreground">
-                Ditt mötesprotokoll har genererats och laddats ner
-              </p>
+        ) : (
+          <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
+            {/* Header with download button */}
+            <div className="flex items-center justify-between">
+              <h2 className="text-3xl font-bold text-card-foreground">Protokoll klart!</h2>
+              <Button onClick={handleDownload} size="lg" className="gap-2">
+                <Download className="w-5 h-5" />
+                Ladda ner .docx
+              </Button>
             </div>
 
-            <Button
-              onClick={onBack}
-              size="lg"
-              className="mt-8"
-            >
-              Spela in nytt möte
-            </Button>
+            {/* Protocol Preview */}
+            <Card>
+              <CardHeader className="text-center border-b">
+                <CardTitle className="text-2xl">MÖTESPROTOKOLL</CardTitle>
+                <h3 className="text-xl font-bold mt-2">{aiProtocol?.title || `Mötesprotokoll ${dateStr}`}</h3>
+                <p className="text-sm text-muted-foreground mt-2">
+                  <span className="font-semibold">Datum:</span> {dateStr} | <span className="font-semibold">Tid:</span> {timeStr}
+                </p>
+              </CardHeader>
+
+              <CardContent className="pt-6 space-y-6">
+                {aiProtocol && (
+                  <>
+                    {/* Summary */}
+                    <div>
+                      <h4 className="text-lg font-bold mb-2">Sammanfattning</h4>
+                      <p className="text-muted-foreground">{aiProtocol.summary}</p>
+                    </div>
+
+                    {/* Main Points */}
+                    <div>
+                      <h4 className="text-lg font-bold mb-2">Huvudpunkter</h4>
+                      <ul className="space-y-2">
+                        {aiProtocol.mainPoints.map((point, index) => (
+                          <li key={index} className="flex gap-2">
+                            <span className="text-primary">•</span>
+                            <span className="text-muted-foreground">{point}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {/* Decisions */}
+                    {aiProtocol.decisions.length > 0 && (
+                      <div>
+                        <h4 className="text-lg font-bold mb-2">Beslut</h4>
+                        <ul className="space-y-2">
+                          {aiProtocol.decisions.map((decision, index) => (
+                            <li key={index} className="flex gap-2">
+                              <span className="text-primary">•</span>
+                              <span className="text-muted-foreground">{decision}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Action Items */}
+                    {aiProtocol.actionItems.length > 0 && (
+                      <div>
+                        <h4 className="text-lg font-bold mb-2">Åtgärdspunkter</h4>
+                        <ul className="space-y-2">
+                          {aiProtocol.actionItems.map((item, index) => (
+                            <li key={index} className="flex gap-2">
+                              <span className="text-primary">•</span>
+                              <span className="text-muted-foreground">{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <div className="border-t pt-4" />
+                  </>
+                )}
+
+                {/* Full Transcript */}
+                <div>
+                  <h4 className="text-lg font-bold mb-2">Fullständig transkription</h4>
+                  <p className="text-muted-foreground whitespace-pre-wrap">{transcript}</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Actions */}
+            <div className="flex justify-center gap-4">
+              <Button onClick={onBack} variant="outline" size="lg">
+                Spela in nytt möte
+              </Button>
+              <Button onClick={handleDownload} size="lg" className="gap-2">
+                <Download className="w-5 h-5" />
+                Ladda ner igen
+              </Button>
+            </div>
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   );
