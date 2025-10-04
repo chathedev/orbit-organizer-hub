@@ -2,3 +2,6 @@ project_id = "abruabdustknwkbaxeei"
 
 [functions.generate-meeting-protocol]
 verify_jwt = false
+
+[functions.send-protocol-email]
+verify_jwt = false

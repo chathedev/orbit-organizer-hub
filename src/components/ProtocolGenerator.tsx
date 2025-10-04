@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Download, ArrowLeft } from "lucide-react";
+import { Download, ArrowLeft, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
 import { saveAs } from "file-saver";
+import { EmailDialog } from "./EmailDialog";
 
 interface ProtocolGeneratorProps {
   transcript: string;
@@ -19,6 +20,9 @@ export const ProtocolGenerator = ({ transcript, onBack }: ProtocolGeneratorProps
   const [participants, setParticipants] = useState("");
   const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [lastGeneratedBlob, setLastGeneratedBlob] = useState<Blob | null>(null);
+  const [lastFileName, setLastFileName] = useState<string>("");
   const { toast } = useToast();
 
   const generateProtocol = async () => {
@@ -135,6 +139,10 @@ export const ProtocolGenerator = ({ transcript, onBack }: ProtocolGeneratorProps
 
       const blob = await Packer.toBlob(doc);
       const fileName = `Mötesprotokoll_${meetingTitle.replace(/\s+/g, '_')}_${date}.docx`;
+      
+      setLastGeneratedBlob(blob);
+      setLastFileName(fileName);
+      
       saveAs(blob, fileName);
 
       toast({
@@ -233,12 +241,33 @@ export const ProtocolGenerator = ({ transcript, onBack }: ProtocolGeneratorProps
               <Download className="mr-2" />
               Ladda ner protokoll
             </Button>
+            {lastGeneratedBlob && (
+              <Button
+                onClick={() => setEmailDialogOpen(true)}
+                size="lg"
+                variant="outline"
+                className="gap-2"
+              >
+                <Mail className="w-5 h-5" />
+                Skicka via e-post
+              </Button>
+            )}
           </div>
 
           <div className="text-xs text-muted-foreground">
             <p>Transkriptionslängd: {transcript.split(' ').length} ord</p>
           </div>
         </div>
+
+        {/* Email Dialog */}
+        {lastGeneratedBlob && (
+          <EmailDialog
+            open={emailDialogOpen}
+            onOpenChange={setEmailDialogOpen}
+            documentBlob={lastGeneratedBlob}
+            fileName={lastFileName}
+          />
+        )}
       </div>
     </div>
   );

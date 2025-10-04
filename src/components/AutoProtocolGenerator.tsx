@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, Download, Loader2 } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
 import { saveAs } from "file-saver";
+import { EmailDialog } from "./EmailDialog";
 
 interface AIProtocol {
   title: string;
@@ -24,6 +25,7 @@ export const AutoProtocolGenerator = ({ transcript, aiProtocol, onBack }: AutoPr
   const [isGenerating, setIsGenerating] = useState(true);
   const [documentBlob, setDocumentBlob] = useState<Blob | null>(null);
   const [fileName, setFileName] = useState<string>("");
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -346,11 +348,25 @@ export const AutoProtocolGenerator = ({ transcript, aiProtocol, onBack }: AutoPr
               <Button onClick={onBack} variant="outline" size="lg">
                 Spela in nytt möte
               </Button>
+              <Button onClick={() => setEmailDialogOpen(true)} variant="outline" size="lg" className="gap-2">
+                <Mail className="w-5 h-5" />
+                Skicka via e-post
+              </Button>
               <Button onClick={handleDownload} size="lg" className="gap-2">
                 <Download className="w-5 h-5" />
                 Ladda ner igen
               </Button>
             </div>
+
+            {/* Email Dialog */}
+            {documentBlob && (
+              <EmailDialog
+                open={emailDialogOpen}
+                onOpenChange={setEmailDialogOpen}
+                documentBlob={documentBlob}
+                fileName={fileName}
+              />
+            )}
           </div>
         )}
       </div>
