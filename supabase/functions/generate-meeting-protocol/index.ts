@@ -28,24 +28,34 @@ serve(async (req) => {
 
     console.log('Generating protocol with Groq AI...');
 
-    const systemPrompt = `Du är en professionell mötessekreterare som skapar strukturerade mötesprotokoll på svenska. 
-Analysera transkriptionen och extrahera:
-1. En kort, beskrivande titel för mötet (max 60 tecken)
-2. En sammanfattning i 2-3 meningar
-3. 3-7 huvudpunkter som diskuterades
-4. Eventuella beslut som fattades (om några)
-5. Action items med ansvarig person om möjligt att identifiera
+    const systemPrompt = `Du är en erfaren mötessekreterare som skapar DETALJERADE och PROFESSIONELLA mötesprotokoll på svenska.
 
-Svara ENDAST med en JSON-struktur enligt detta format:
+VIKTIGT: Du måste ALLTID ge ett komplett protokoll, även om transkriptionen är kort eller oklar!
+
+Din uppgift:
+1. Skapa en BESKRIVANDE titel (max 60 tecken) baserat på vad som diskuterades
+2. Skriv en GRUNDLIG sammanfattning i 3-5 meningar som fångar essensen av mötet
+3. Identifiera 5-10 huvudpunkter som diskuterades (var generös och analysera noggrant)
+4. Leta efter och dokumentera ALLA beslut som fattades
+5. Identifiera och lista ALLA uppgifter eller action items som nämndes
+
+REGLER:
+- Även om transkriptionen är kort, analysera den noggrant och skapa ett meningsfullt protokoll
+- Var kreativ och tolka innehållet professionellt
+- Om något är otydligt, gör en kvalificerad tolkning
+- Skapa ALLTID minst 3-5 huvudpunkter, även från korta diskussioner
+- Om inga tydliga beslut finns, tolka vad som diskuterades som potentiella beslutspunkter
+
+Svara ENDAST med JSON i detta format:
 {
-  "title": "Kort beskrivande titel",
-  "summary": "Sammanfattning av mötet",
-  "mainPoints": ["Punkt 1", "Punkt 2", "Punkt 3"],
-  "decisions": ["Beslut 1", "Beslut 2"],
-  "actionItems": ["Uppgift 1 - Ansvarig: Namn", "Uppgift 2 - Ansvarig: Namn"]
+  "title": "Beskrivande titel baserat på innehållet",
+  "summary": "Detaljerad sammanfattning i 3-5 meningar som fångar hela mötet",
+  "mainPoints": ["Huvudpunkt 1 med detaljer", "Huvudpunkt 2 med kontext", "Huvudpunkt 3...", "..."],
+  "decisions": ["Beslut 1 om det finns", "Beslut 2..."],
+  "actionItems": ["Uppgift 1 med ansvarig om möjligt", "Uppgift 2..."]
 }
 
-Om inga beslut eller action items finns, använd tomma arrayer.`;
+Ge ALDRIG tomma arrayer för mainPoints - det ska alltid finnas minst 3-5 punkter!`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -57,10 +67,10 @@ Om inga beslut eller action items finns, använd tomma arrayer.`;
         model: 'llama-3.3-70b-versatile',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Analysera denna mötestranskription:\n\n${transcript}` }
+          { role: 'user', content: `Analysera denna mötestranskription noggrant och skapa ett DETALJERAT protokoll:\n\n${transcript}\n\nKom ihåg: Ge ALLTID ett komplett protokoll med minst 3-5 huvudpunkter, även om transkriptionen är kort!` }
         ],
-        temperature: 0.3,
-        max_tokens: 2000,
+        temperature: 0.7,
+        max_tokens: 3000,
       }),
     });
 

@@ -20,7 +20,6 @@ interface RecordingViewProps {
 export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [newText, setNewText] = useState("");
   const [isGeneratingProtocol, setIsGeneratingProtocol] = useState(false);
   const recognitionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -53,11 +52,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       }
 
       if (final) {
-        setNewText(final);
-        setTimeout(() => {
-          setTranscript(prev => prev + final);
-          setNewText("");
-        }, 1500);
+        setTranscript(prev => prev + final);
       }
     };
 
@@ -132,7 +127,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     
     setIsRecording(false);
     
-    const fullTranscript = transcript + newText;
+    const fullTranscript = transcript;
     
     if (!fullTranscript.trim()) {
       toast({
@@ -201,26 +196,32 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         <div className="max-w-4xl mx-auto px-4 py-6">
           <h1 className="text-2xl font-bold text-card-foreground">Spelar in möte</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Prata fritt • Texten sparas löpande
+            Prata fritt • Texten visas direkt i realtid
           </p>
         </div>
       </div>
 
-      {/* Visualization */}
-      <div className="flex-1 flex flex-col items-center justify-center p-8">
-        <VoiceVisualization isRecording={isRecording} audioStream={streamRef.current} />
-        
-        {/* New text display with fade-in animation */}
-        {newText && (
-          <div className="mt-8 max-w-2xl text-center">
-            <p className="text-lg text-primary font-medium animate-fade-in">
-              {newText}
+      {/* Content */}
+      <div className="flex-1 flex flex-col items-center p-8 max-w-4xl mx-auto w-full">
+        {/* Real-time transcript display */}
+        <div className="w-full bg-card rounded-lg border border-border p-6 mb-8 min-h-[300px] max-h-[500px] overflow-y-auto">
+          <h2 className="text-lg font-semibold text-card-foreground mb-4 flex items-center gap-2">
+            <FileText className="w-5 h-5" />
+            Transkription (realtid)
+          </h2>
+          {transcript ? (
+            <p className="text-base text-muted-foreground leading-relaxed whitespace-pre-wrap">
+              {transcript}
             </p>
-          </div>
-        )}
+          ) : (
+            <p className="text-sm text-muted-foreground/60 italic">
+              Börja prata så visas texten här direkt...
+            </p>
+          )}
+        </div>
 
         {/* Control buttons */}
-        <div className="mt-12 flex gap-4">
+        <div className="flex gap-4">
           <Button
             onClick={stopRecording}
             size="lg"
@@ -237,7 +238,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         <div className="mt-6 flex items-center gap-2 px-4 py-2 bg-primary/10 rounded-md">
           <div className="w-3 h-3 bg-primary rounded-full animate-pulse" />
           <span className="text-sm font-medium text-primary">
-            {isGeneratingProtocol ? "Genererar protokoll med AI..." : "Spelar in..."}
+            {isGeneratingProtocol ? "Genererar detaljerat protokoll med AI..." : "Spelar in..."}
           </span>
         </div>
       </div>
