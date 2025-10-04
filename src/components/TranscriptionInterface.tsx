@@ -1,84 +1,22 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Mic, Square, TestTube } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 export const TranscriptionInterface = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [interimTranscript, setInterimTranscript] = useState("");
-  const recognitionRef = useRef<any>(null);
-  const testTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const transcriptEndRef = useRef<HTMLDivElement>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const testTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
-
-  useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    
-    if (!SpeechRecognition) {
-      toast({
-        title: "Inte stödd",
-        description: "Din webbläsare stöder inte rösttranskribering. Använd Chrome eller Edge.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'sv-SE';
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    recognition.onresult = (event: any) => {
-      let interim = '';
-      let final = '';
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcriptPart = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          final += transcriptPart + ' ';
-        } else {
-          interim += transcriptPart;
-        }
-      }
-
-      if (final) {
-        setTranscript(prev => prev + final);
-        setInterimTranscript('');
-      } else {
-        setInterimTranscript(interim);
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error('Taligenkänningsfel:', event.error);
-      if (event.error === 'no-speech') {
-        toast({
-          title: "Inget tal upptäckt",
-          description: "Försök prata lite högre eller närmare mikrofonen.",
-        });
-      }
-    };
-
-    recognitionRef.current = recognition;
-
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-    };
-  }, [toast]);
-
-  useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcript, interimTranscript]);
 
   const startAudioCapture = async () => {
     try {
-      // Försök fånga systemljud + mikrofon
       let stream: MediaStream;
       
       try {
@@ -94,7 +32,6 @@ export const TranscriptionInterface = () => {
         });
         console.log("Systemljud + mikrofon aktiverat");
       } catch (systemError) {
-        // Fallback till endast mikrofon
         console.log("Använder endast mikrofon");
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
@@ -106,14 +43,7 @@ export const TranscriptionInterface = () => {
       }
 
       streamRef.current = stream;
-      
-      // Skapa AudioContext för att processa ljudet
-      audioContextRef.current = new AudioContext();
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      const destination = audioContextRef.current.createMediaStreamDestination();
-      source.connect(destination);
-
-      return true;
+      return stream;
     } catch (error) {
       console.error("Kunde inte starta ljudinspelning:", error);
       toast({
@@ -121,79 +51,187 @@ export const TranscriptionInterface = () => {
         description: "Kunde inte komma åt mikrofonen eller systemljud",
         variant: "destructive",
       });
-      return false;
+      throw error;
+    }
+  };
+
+  const sendAudioToTranscribe = async (audioBlob: Blob) => {
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(audioBlob);
+      
+      return new Promise<string>((resolve, reject) => {
+        reader.onloadend = async () => {
+          const base64Audio = reader.result as string;
+          
+          try {
+            const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+              body: { audio: base64Audio }
+            });
+
+            if (error) {
+              console.error('Transkriberings-fel:', error);
+              reject(error);
+              return;
+            }
+
+            resolve(data.text || '');
+          } catch (err) {
+            console.error('Fel vid anrop till edge function:', err);
+            reject(err);
+          }
+        };
+        
+        reader.onerror = () => reject(reader.error);
+      });
+    } catch (error) {
+      console.error('Fel vid transkribering:', error);
+      throw error;
     }
   };
 
   const startTest = async () => {
-    if (!recognitionRef.current) return;
-    
-    const success = await startAudioCapture();
-    if (!success) return;
+    try {
+      setIsTesting(true);
+      setTranscript("");
+      audioChunksRef.current = [];
 
-    setIsTesting(true);
-    setTranscript("");
-    setInterimTranscript("");
-    
-    recognitionRef.current.start();
-    
-    toast({
-      title: "Test startat",
-      description: "Säg något för att testa mikrofonen (10 sekunder)",
-    });
+      const stream = await startAudioCapture();
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current = mediaRecorder;
 
-    testTimeoutRef.current = setTimeout(() => {
-      stopRecording();
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        
+        try {
+          toast({
+            title: "Transkriberar...",
+            description: "Bearbetar ljud...",
+          });
+          
+          const transcribedText = await sendAudioToTranscribe(audioBlob);
+          setTranscript(transcribedText);
+          
+          toast({
+            title: "Test klart",
+            description: "Mikrofonen fungerar!",
+          });
+        } catch (error) {
+          console.error('Transkriberings-fel:', error);
+          toast({
+            title: "Transkribering misslyckades",
+            description: "Kunde inte transkribera ljudet.",
+            variant: "destructive",
+          });
+        }
+        
+        setIsTesting(false);
+      };
+
+      toast({
+        title: "Test startat",
+        description: "Säg något i 10 sekunder...",
+      });
+
+      mediaRecorder.start();
+
+      testTimeoutRef.current = setTimeout(() => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+          mediaRecorderRef.current.stop();
+        }
+      }, 10000);
+    } catch (error) {
+      console.error('Test error:', error);
       setIsTesting(false);
       toast({
-        title: "Test avslutat",
-        description: "Mikrofonen fungerar! Klicka på 'Spela in möte' för att börja.",
+        title: "Kunde inte starta test",
+        description: "Kontrollera att du har gett mikrofontillstånd.",
+        variant: "destructive",
       });
-    }, 10000);
+    }
   };
 
   const startRecording = async () => {
-    if (!recognitionRef.current) return;
-    
-    const success = await startAudioCapture();
-    if (!success) return;
+    try {
+      setIsRecording(true);
+      setTranscript("");
+      audioChunksRef.current = [];
 
-    setIsRecording(true);
-    setTranscript("");
-    setInterimTranscript("");
-    
-    recognitionRef.current.start();
-    
-    toast({
-      title: "Inspelning startad",
-      description: "Transkribering pågår...",
-    });
+      const stream = await startAudioCapture();
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.start(1000);
+
+      toast({
+        title: "Inspelning startad",
+        description: "Transkriberar mötet...",
+      });
+
+      // Skicka ljuddata var 5:e sekund för löpande transkribering
+      intervalRef.current = setInterval(async () => {
+        if (audioChunksRef.current.length > 0) {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          audioChunksRef.current = [];
+          
+          try {
+            const transcribedText = await sendAudioToTranscribe(audioBlob);
+            if (transcribedText) {
+              setTranscript(prev => prev + transcribedText + ' ');
+            }
+          } catch (error) {
+            console.error('Transkriberings-fel:', error);
+          }
+        }
+      }, 5000);
+
+    } catch (error) {
+      console.error('Recording error:', error);
+      setIsRecording(false);
+      toast({
+        title: "Kunde inte starta inspelning",
+        description: "Kontrollera att du har gett mikrofontillstånd.",
+        variant: "destructive",
+      });
+    }
   };
 
   const stopRecording = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
     }
     
     if (testTimeoutRef.current) {
       clearTimeout(testTimeoutRef.current);
+      testTimeoutRef.current = null;
     }
 
-    // Stoppa och rensa ljudströmmar
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
 
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    
     setIsRecording(false);
     setIsTesting(false);
-    
-    if (transcript || interimTranscript) {
+
+    if (transcript) {
       toast({
         title: "Inspelning stoppad",
         description: "Transkriberingen är klar.",
@@ -210,7 +248,7 @@ export const TranscriptionInterface = () => {
         <div className="max-w-4xl mx-auto px-4 py-6">
           <h1 className="text-2xl font-bold text-card-foreground">Mötestranskribering</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Transkribera i realtid • Svenska • Inget sparas
+            Transkribera i realtid • Svenska • AI-driven med Gemini
           </p>
         </div>
       </div>
@@ -265,7 +303,7 @@ export const TranscriptionInterface = () => {
       <div className="flex-1 overflow-hidden">
         <div className="max-w-4xl mx-auto px-4 py-6 h-full">
           <div className="bg-card border border-border rounded-lg p-6 h-full overflow-y-auto">
-            {!transcript && !interimTranscript ? (
+            {!transcript ? (
               <div className="flex items-center justify-center h-full text-center">
                 <div className="space-y-2">
                   <Mic className="w-12 h-12 text-muted-foreground mx-auto opacity-50" />
@@ -278,13 +316,7 @@ export const TranscriptionInterface = () => {
               <div className="prose prose-lg max-w-none">
                 <p className="text-card-foreground leading-relaxed whitespace-pre-wrap">
                   {transcript}
-                  {interimTranscript && (
-                    <span className="text-muted-foreground italic">
-                      {interimTranscript}
-                    </span>
-                  )}
                 </p>
-                <div ref={transcriptEndRef} />
               </div>
             )}
           </div>
