@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import { Resend } from "https://esm.sh/resend@2.0.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -24,45 +24,28 @@ const handler = async (req: Request): Promise<Response> => {
 
     console.log('Sending email to:', recipients);
 
-    // Configure SMTP client for iCloud
-    const client = new SMTPClient({
-      connection: {
-        hostname: "smtp.mail.me.com",
-        port: 587,
-        tls: true,
-        auth: {
-          username: "send@wby.se",
-          password: Deno.env.get('SMTP_PASSWORD') as string,
+    const resend = new Resend(Deno.env.get('RESEND_API_KEY') as string);
+
+    // Send email to all recipients
+    const { data, error } = await resend.emails.send({
+      from: "WBY Möten <send@wby.se>",
+      to: recipients,
+      subject: subject,
+      html: `<p style="white-space: pre-wrap;">${message.replace(/\n/g, '<br>')}</p>`,
+      attachments: [
+        {
+          filename: fileName,
+          content: documentBase64,
         },
-      },
+      ],
     });
 
-    // Send email to each recipient
-    for (const recipient of recipients) {
-      try {
-        await client.send({
-          from: "send@wby.se",
-          to: recipient,
-          subject: subject,
-          content: message,
-          html: `<p>${message.replace(/\n/g, '<br>')}</p>`,
-          attachments: [
-            {
-              filename: fileName,
-              content: documentBase64,
-              encoding: "base64",
-              contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            },
-          ],
-        });
-        console.log(`Email sent successfully to: ${recipient}`);
-      } catch (emailError: any) {
-        console.error(`Failed to send to ${recipient}:`, emailError);
-        throw emailError;
-      }
+    if (error) {
+      console.error('Resend error:', error);
+      throw new Error(error.message || 'Failed to send email');
     }
 
-    await client.close();
+    console.log('Email sent successfully:', data);
 
     return new Response(
       JSON.stringify({ 
@@ -80,7 +63,7 @@ const handler = async (req: Request): Promise<Response> => {
   } catch (error: any) {
     console.error("Error in send-protocol-email function:", error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: error.message || 'Ett fel uppstod vid skickandet' }),
       {
         status: 500,
         headers: { "Content-Type": "application/json", ...corsHeaders },
