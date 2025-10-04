@@ -40,14 +40,18 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     const recognition = new SpeechRecognition();
     recognition.lang = 'sv-SE';
     recognition.continuous = true;
-    recognition.interimResults = false;
+    recognition.interimResults = true;
 
     recognition.onresult = (event: any) => {
+      let interim = '';
       let final = '';
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          final += event.results[i][0].transcript + ' ';
+          final += transcript + ' ';
+        } else {
+          interim += transcript;
         }
       }
 
