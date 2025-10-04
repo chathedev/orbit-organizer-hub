@@ -59,7 +59,7 @@ export const WelcomeScreen = ({
             Innan vi börjar:
           </h2>
           <ul className="text-sm text-muted-foreground space-y-2 text-left">
-            <li>✓ Vi behöver tillgång till din mikrofon och systemljud</li>
+            <li>✓ Vi behöver tillgång till din mikrofon endast</li>
             <li>✓ Fångar bara i möte personligt, inte via teams osv</li>
             <li>✓ Allt transkriberas lokalt i webbläsaren</li>
             <li>✓ Ingen data sparas eller skickas någonstans</li>
