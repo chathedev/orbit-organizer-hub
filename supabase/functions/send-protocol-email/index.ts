@@ -24,9 +24,6 @@ const handler = async (req: Request): Promise<Response> => {
 
     console.log('Sending email to:', recipients);
 
-    // Decode base64 document
-    const documentBuffer = Uint8Array.from(atob(documentBase64), c => c.charCodeAt(0));
-
     // Configure SMTP client for iCloud
     const client = new SMTPClient({
       connection: {
@@ -42,22 +39,27 @@ const handler = async (req: Request): Promise<Response> => {
 
     // Send email to each recipient
     for (const recipient of recipients) {
-      await client.send({
-        from: "send@wby.se",
-        to: recipient,
-        subject: subject,
-        content: message,
-        html: `<p>${message.replace(/\n/g, '<br>')}</p>`,
-        attachments: [
-          {
-            filename: fileName,
-            content: documentBuffer,
-            contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            encoding: "binary",
-          },
-        ],
-      });
-      console.log(`Email sent successfully to: ${recipient}`);
+      try {
+        await client.send({
+          from: "send@wby.se",
+          to: recipient,
+          subject: subject,
+          content: message,
+          html: `<p>${message.replace(/\n/g, '<br>')}</p>`,
+          attachments: [
+            {
+              filename: fileName,
+              content: documentBase64,
+              encoding: "base64",
+              contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            },
+          ],
+        });
+        console.log(`Email sent successfully to: ${recipient}`);
+      } catch (emailError: any) {
+        console.error(`Failed to send to ${recipient}:`, emailError);
+        throw emailError;
+      }
     }
 
     await client.close();
