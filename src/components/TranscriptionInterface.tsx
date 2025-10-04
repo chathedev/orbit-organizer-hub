@@ -1,207 +1,47 @@
-import { useState, useRef, useEffect } from "react";
-import { Mic, Square, TestTube } from "lucide-react";
+import { useState } from "react";
+import { Mic, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/hooks/use-toast";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { RecordingView } from "./RecordingView";
+import { ProtocolGenerator } from "./ProtocolGenerator";
+
+type View = "welcome" | "recording" | "protocol";
 
 export const TranscriptionInterface = () => {
-  const [isRecording, setIsRecording] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
+  const [currentView, setCurrentView] = useState<View>("welcome");
   const [transcript, setTranscript] = useState("");
-  const [interimTranscript, setInterimTranscript] = useState("");
-  const recognitionRef = useRef<any>(null);
-  const testTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const transcriptEndRef = useRef<HTMLDivElement>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const { toast } = useToast();
 
-  useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    
-    if (!SpeechRecognition) {
-      toast({
-        title: "Inte stödd",
-        description: "Din webbläsare stöder inte rösttranskribering. Använd Chrome eller Edge.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'sv-SE';
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    recognition.onresult = (event: any) => {
-      let interim = '';
-      let final = '';
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcriptPart = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          final += transcriptPart + ' ';
-        } else {
-          interim += transcriptPart;
-        }
-      }
-
-      if (final) {
-        setTranscript(prev => prev + final);
-        setInterimTranscript('');
-      } else {
-        setInterimTranscript(interim);
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error('Taligenkänningsfel:', event.error);
-      if (event.error === 'no-speech') {
-        toast({
-          title: "Inget tal upptäckt",
-          description: "Försök prata lite högre eller närmare mikrofonen.",
-        });
-      }
-    };
-
-    recognitionRef.current = recognition;
-
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-    };
-  }, [toast]);
-
-  useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcript, interimTranscript]);
-
-  const startAudioCapture = async () => {
-    try {
-      // Försök fånga systemljud + mikrofon
-      let stream: MediaStream;
-      
-      try {
-        // @ts-ignore - Chrome experimentell funktion
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            // @ts-ignore
-            systemAudio: "include"
-          }
-        });
-        console.log("Systemljud + mikrofon aktiverat");
-      } catch (systemError) {
-        // Fallback till endast mikrofon
-        console.log("Använder endast mikrofon");
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          }
-        });
-      }
-
-      streamRef.current = stream;
-      
-      // Skapa AudioContext för att processa ljudet
-      audioContextRef.current = new AudioContext();
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      const destination = audioContextRef.current.createMediaStreamDestination();
-      source.connect(destination);
-
-      return true;
-    } catch (error) {
-      console.error("Kunde inte starta ljudinspelning:", error);
-      toast({
-        title: "Fel",
-        description: "Kunde inte komma åt mikrofonen eller systemljud",
-        variant: "destructive",
-      });
-      return false;
-    }
+  const handleStartRecording = () => {
+    setCurrentView("recording");
   };
 
-  const startTest = async () => {
-    if (!recognitionRef.current) return;
-    
-    const success = await startAudioCapture();
-    if (!success) return;
+  const handleFinishRecording = (recordedTranscript: string) => {
+    setTranscript(recordedTranscript);
+    setCurrentView("protocol");
+  };
 
-    setIsTesting(true);
+  const handleBackToWelcome = () => {
+    setCurrentView("welcome");
     setTranscript("");
-    setInterimTranscript("");
-    
-    recognitionRef.current.start();
-    
-    toast({
-      title: "Test startat",
-      description: "Säg något för att testa mikrofonen (10 sekunder)",
-    });
-
-    testTimeoutRef.current = setTimeout(() => {
-      stopRecording();
-      setIsTesting(false);
-      toast({
-        title: "Test avslutat",
-        description: "Mikrofonen fungerar! Klicka på 'Spela in möte' för att börja.",
-      });
-    }, 10000);
   };
 
-  const startRecording = async () => {
-    if (!recognitionRef.current) return;
-    
-    const success = await startAudioCapture();
-    if (!success) return;
+  if (currentView === "recording") {
+    return (
+      <RecordingView
+        onFinish={handleFinishRecording}
+        onBack={handleBackToWelcome}
+      />
+    );
+  }
 
-    setIsRecording(true);
-    setTranscript("");
-    setInterimTranscript("");
-    
-    recognitionRef.current.start();
-    
-    toast({
-      title: "Inspelning startad",
-      description: "Transkribering pågår...",
-    });
-  };
-
-  const stopRecording = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
-    
-    if (testTimeoutRef.current) {
-      clearTimeout(testTimeoutRef.current);
-    }
-
-    // Stoppa och rensa ljudströmmar
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    
-    setIsRecording(false);
-    setIsTesting(false);
-    
-    if (transcript || interimTranscript) {
-      toast({
-        title: "Inspelning stoppad",
-        description: "Transkriberingen är klar.",
-      });
-    }
-  };
-
-  const isActive = isRecording || isTesting;
+  if (currentView === "protocol") {
+    return (
+      <ProtocolGenerator
+        transcript={transcript}
+        onBack={handleBackToWelcome}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -215,78 +55,50 @@ export const TranscriptionInterface = () => {
         </div>
       </div>
 
-      {/* Control Panel */}
+      {/* Alert about browser compatibility */}
       <div className="border-b border-border bg-card">
         <div className="max-w-4xl mx-auto px-4 py-6">
-          <div className="flex flex-wrap gap-3">
-            <Button
-              onClick={startTest}
-              disabled={isActive}
-              variant="secondary"
-              size="lg"
-            >
-              <TestTube className="mr-2" />
-              Testa mikrofon
-            </Button>
-
-            {!isActive ? (
-              <Button
-                onClick={startRecording}
-                size="lg"
-                className="bg-accent hover:bg-accent/90"
-              >
-                <Mic className="mr-2" />
-                Spela in möte
-              </Button>
-            ) : (
-              <Button
-                onClick={stopRecording}
-                size="lg"
-                variant="destructive"
-              >
-                <Square className="mr-2" />
-                Stoppa
-              </Button>
-            )}
-
-            {isActive && (
-              <div className="flex items-center gap-2 px-4 py-2 bg-primary/10 rounded-md">
-                <div className="w-3 h-3 bg-primary rounded-full animate-pulse" />
-                <span className="text-sm font-medium text-primary">
-                  {isTesting ? "Testar..." : "Spelar in..."}
-                </span>
-              </div>
-            )}
-          </div>
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              <strong>OBS:</strong> Denna funktion fungerar endast i Google Chrome webbläsare.
+            </AlertDescription>
+          </Alert>
         </div>
       </div>
 
-      {/* Transcript Display */}
-      <div className="flex-1 overflow-hidden">
-        <div className="max-w-4xl mx-auto px-4 py-6 h-full">
-          <div className="bg-card border border-border rounded-lg p-6 h-full overflow-y-auto">
-            {!transcript && !interimTranscript ? (
-              <div className="flex items-center justify-center h-full text-center">
-                <div className="space-y-2">
-                  <Mic className="w-12 h-12 text-muted-foreground mx-auto opacity-50" />
-                  <p className="text-muted-foreground">
-                    Tryck på "Testa mikrofon" eller "Spela in möte" för att börja
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="prose prose-lg max-w-none">
-                <p className="text-card-foreground leading-relaxed whitespace-pre-wrap">
-                  {transcript}
-                  {interimTranscript && (
-                    <span className="text-muted-foreground italic">
-                      {interimTranscript}
-                    </span>
-                  )}
-                </p>
-                <div ref={transcriptEndRef} />
-              </div>
-            )}
+      {/* Main content */}
+      <div className="flex-1 flex flex-col items-center justify-center p-8">
+        <div className="max-w-2xl text-center space-y-8">
+          <div>
+            <Mic className="w-24 h-24 text-primary mx-auto mb-6" />
+            <h2 className="text-3xl font-bold text-card-foreground mb-4">
+              Välkommen till mötestranskribering
+            </h2>
+            <p className="text-muted-foreground text-lg">
+              Transkribera dina möten i realtid med svensk taligenkänning. 
+              Skapa professionella mötesprotokoll snabbt och enkelt.
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <Button
+              onClick={handleStartRecording}
+              size="lg"
+              className="px-12 py-6 text-lg"
+            >
+              <Mic className="mr-2 h-6 w-6" />
+              Spela in möte
+            </Button>
+
+            <div className="text-sm text-muted-foreground">
+              <ul className="space-y-2">
+                <li>✓ Realtidstranskribering på svenska</li>
+                <li>✓ Animerad röstvisualisering</li>
+                <li>✓ Generera och ladda ner Word-protokoll</li>
+                <li>✓ Ingen data sparas</li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
