@@ -63,7 +63,7 @@ export const WelcomeScreen = ({
             <li>✓ Fångar bara i möte personligt, inte via teams osv</li>
             <li>✓ Allt transkriberas lokalt i webbläsaren</li>
             <li>✓ Ingen data sparas eller skickas någonstans</li>
-            <li>✓ Fungerar bäst i Chrome eller Edge</li>
+            <li>✓ Fungerar bäst i Google och Edge</li>
           </ul>
         </div>
 
