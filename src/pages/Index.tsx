@@ -1,14 +1,34 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useState } from "react";
+import { WelcomeScreen } from "@/components/WelcomeScreen";
+import { TranscriptionInterface } from "@/components/TranscriptionInterface";
+import { useToast } from "@/hooks/use-toast";
 
 const Index = () => {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
-      </div>
-    </div>
-  );
+  const [hasPermission, setHasPermission] = useState(false);
+  const { toast } = useToast();
+
+  const handlePermissionGranted = () => {
+    setHasPermission(true);
+  };
+
+  const handlePermissionDenied = () => {
+    toast({
+      title: "Mikrofontillstånd krävs",
+      description: "Vi behöver tillgång till din mikrofon för att transkribera. Uppdatera sidan och försök igen.",
+      variant: "destructive",
+    });
+  };
+
+  if (!hasPermission) {
+    return (
+      <WelcomeScreen 
+        onPermissionGranted={handlePermissionGranted}
+        onPermissionDenied={handlePermissionDenied}
+      />
+    );
+  }
+
+  return <TranscriptionInterface />;
 };
 
 export default Index;
