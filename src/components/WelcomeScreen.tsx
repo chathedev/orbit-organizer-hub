@@ -9,7 +9,31 @@ interface WelcomeScreenProps {
 export const WelcomeScreen = ({ onPermissionGranted, onPermissionDenied }: WelcomeScreenProps) => {
   const requestMicrophonePermission = async () => {
     try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Be om både mikrofon OCH systemljud (desktop audio)
+      const constraints = {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      };
+
+      // Försök först med systemljud-capture om det stöds
+      try {
+        // @ts-ignore - Chrome experimentell funktion
+        await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            ...constraints.audio,
+            // @ts-ignore
+            systemAudio: "include" 
+          }
+        });
+      } catch (systemAudioError) {
+        // Fallback till endast mikrofon om systemljud inte stöds
+        console.log("Systemljud inte tillgängligt, använder endast mikrofon");
+        await navigator.mediaDevices.getUserMedia(constraints);
+      }
+
       onPermissionGranted();
     } catch (error) {
       console.error("Mikrofontillstånd nekades:", error);
@@ -37,7 +61,8 @@ export const WelcomeScreen = ({ onPermissionGranted, onPermissionDenied }: Welco
             Innan vi börjar:
           </h2>
           <ul className="text-sm text-muted-foreground space-y-2 text-left">
-            <li>✓ Vi behöver tillgång till din mikrofon</li>
+            <li>✓ Vi behöver tillgång till din mikrofon och systemljud</li>
+            <li>✓ Fångar både din röst och andra i mötet</li>
             <li>✓ Allt transkriberas lokalt i webbläsaren</li>
             <li>✓ Ingen data sparas eller skickas någonstans</li>
             <li>✓ Fungerar bäst i Chrome eller Edge</li>

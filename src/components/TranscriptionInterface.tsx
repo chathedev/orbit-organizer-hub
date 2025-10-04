@@ -11,6 +11,8 @@ export const TranscriptionInterface = () => {
   const recognitionRef = useRef<any>(null);
   const testTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -74,9 +76,61 @@ export const TranscriptionInterface = () => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcript, interimTranscript]);
 
-  const startTest = () => {
+  const startAudioCapture = async () => {
+    try {
+      // Försök fånga systemljud + mikrofon
+      let stream: MediaStream;
+      
+      try {
+        // @ts-ignore - Chrome experimentell funktion
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            // @ts-ignore
+            systemAudio: "include"
+          }
+        });
+        console.log("Systemljud + mikrofon aktiverat");
+      } catch (systemError) {
+        // Fallback till endast mikrofon
+        console.log("Använder endast mikrofon");
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+      }
+
+      streamRef.current = stream;
+      
+      // Skapa AudioContext för att processa ljudet
+      audioContextRef.current = new AudioContext();
+      const source = audioContextRef.current.createMediaStreamSource(stream);
+      const destination = audioContextRef.current.createMediaStreamDestination();
+      source.connect(destination);
+
+      return true;
+    } catch (error) {
+      console.error("Kunde inte starta ljudinspelning:", error);
+      toast({
+        title: "Fel",
+        description: "Kunde inte komma åt mikrofonen eller systemljud",
+        variant: "destructive",
+      });
+      return false;
+    }
+  };
+
+  const startTest = async () => {
     if (!recognitionRef.current) return;
     
+    const success = await startAudioCapture();
+    if (!success) return;
+
     setIsTesting(true);
     setTranscript("");
     setInterimTranscript("");
@@ -98,9 +152,12 @@ export const TranscriptionInterface = () => {
     }, 10000);
   };
 
-  const startRecording = () => {
+  const startRecording = async () => {
     if (!recognitionRef.current) return;
     
+    const success = await startAudioCapture();
+    if (!success) return;
+
     setIsRecording(true);
     setTranscript("");
     setInterimTranscript("");
@@ -120,6 +177,17 @@ export const TranscriptionInterface = () => {
     
     if (testTimeoutRef.current) {
       clearTimeout(testTimeoutRef.current);
+    }
+
+    // Stoppa och rensa ljudströmmar
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
     }
     
     setIsRecording(false);
