@@ -27,11 +27,13 @@ export const VoiceVisualization = ({ isRecording, audioStream }: VoiceVisualizat
     const primaryHsl = styles.getPropertyValue('--primary').trim();
     const accentHsl = styles.getPropertyValue('--accent').trim();
     const backgroundHsl = styles.getPropertyValue('--background').trim();
-    
+
+    const toComma = (h: string) => h.replace(/\s+/g, ', ');
+
     colorsRef.current = {
-      primary: `hsl(${primaryHsl})`,
-      accent: `hsl(${accentHsl})`,
-      background: `hsl(${backgroundHsl})`
+      primary: `hsl(${toComma(primaryHsl)})`,
+      accent: `hsl(${toComma(accentHsl)})`,
+      background: `hsl(${toComma(backgroundHsl)})`
     };
 
     const audioContext = new AudioContext();
