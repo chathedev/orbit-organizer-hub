@@ -1,1 +1,4 @@
 project_id = "abruabdustknwkbaxeei"
+
+[functions.generate-meeting-protocol]
+verify_jwt = false

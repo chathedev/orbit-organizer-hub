@@ -4,8 +4,16 @@ import { Button } from "@/components/ui/button";
 import { VoiceVisualization } from "./VoiceVisualization";
 import { useToast } from "@/hooks/use-toast";
 
+interface AIProtocol {
+  title: string;
+  summary: string;
+  mainPoints: string[];
+  decisions: string[];
+  actionItems: string[];
+}
+
 interface RecordingViewProps {
-  onFinish: (transcript: string) => void;
+  onFinish: (data: { transcript: string; aiProtocol: AIProtocol | null }) => void;
   onBack: () => void;
 }
 
@@ -13,6 +21,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [newText, setNewText] = useState("");
+  const [isGeneratingProtocol, setIsGeneratingProtocol] = useState(false);
   const recognitionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const { toast } = useToast();
@@ -111,7 +120,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     };
   }, [toast, onBack]);
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
     if (recognitionRef.current) {
       recognitionRef.current.stop();
     }
@@ -123,15 +132,65 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     
     setIsRecording(false);
     
-    if (transcript || newText) {
-      onFinish(transcript + newText);
-    } else {
+    const fullTranscript = transcript + newText;
+    
+    if (!fullTranscript.trim()) {
       toast({
         title: "Ingen text",
         description: "Ingen transkription inspelad.",
         variant: "destructive",
       });
       onBack();
+      return;
+    }
+
+    // Generate AI protocol
+    setIsGeneratingProtocol(true);
+    
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-meeting-protocol`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({ transcript: fullTranscript }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to generate protocol');
+      }
+
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // Pass AI-generated protocol to next view
+      onFinish({ 
+        transcript: fullTranscript, 
+        aiProtocol: data.protocol 
+      });
+    } catch (error) {
+      console.error('AI protocol generation failed:', error);
+      
+      toast({
+        title: "AI-generering misslyckades",
+        description: "Skapar enkelt protokoll med transkription...",
+        variant: "default",
+      });
+
+      // Fallback: continue without AI protocol
+      onFinish({ 
+        transcript: fullTranscript, 
+        aiProtocol: null 
+      });
+    } finally {
+      setIsGeneratingProtocol(false);
     }
   };
 
@@ -167,9 +226,10 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
             size="lg"
             variant="destructive"
             className="px-8"
+            disabled={isGeneratingProtocol}
           >
             <Square className="mr-2" />
-            Stoppa & skapa protokoll
+            {isGeneratingProtocol ? "Genererar AI-protokoll..." : "Stoppa & skapa protokoll"}
           </Button>
         </div>
 
@@ -177,7 +237,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         <div className="mt-6 flex items-center gap-2 px-4 py-2 bg-primary/10 rounded-md">
           <div className="w-3 h-3 bg-primary rounded-full animate-pulse" />
           <span className="text-sm font-medium text-primary">
-            Spelar in...
+            {isGeneratingProtocol ? "Genererar protokoll med AI..." : "Spelar in..."}
           </span>
         </div>
       </div>

@@ -48,6 +48,7 @@ export const VoiceVisualization = ({ isRecording, audioStream }: VoiceVisualizat
     const dataArray = new Uint8Array(bufferLength);
 
     let rotation = 0;
+    let pulsePhase = 0;
 
     const draw = () => {
       if (!ctx || !analyserRef.current) return;
@@ -58,31 +59,57 @@ export const VoiceVisualization = ({ isRecording, audioStream }: VoiceVisualizat
       const width = canvas.width;
       const height = canvas.height;
 
-      ctx.fillStyle = colorsRef.current.background;
+      // Smooth background with subtle gradient
+      const bgGradient = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width / 2);
+      bgGradient.addColorStop(0, colorsRef.current.background);
+      const darkerBg = colorsRef.current.background.replace('hsl', 'hsla').replace(')', ', 0.95)');
+      bgGradient.addColorStop(1, darkerBg);
+      ctx.fillStyle = bgGradient;
       ctx.fillRect(0, 0, width, height);
 
-      // Calculate average volume
+      // Calculate average volume with smoothing
       const average = dataArray.reduce((a, b) => a + b) / bufferLength;
       const normalizedVolume = average / 255;
 
-      // 3D sphere effect
+      // Smooth rotation and pulsing
+      rotation += 0.005 + normalizedVolume * 0.01;
+      pulsePhase += 0.03;
+      const pulseEffect = Math.sin(pulsePhase) * 0.1 + 1;
+
       const centerX = width / 2;
       const centerY = height / 2;
-      const baseRadius = 80;
-      const maxRadius = 150;
-      const radius = baseRadius + (maxRadius - baseRadius) * normalizedVolume;
+      const baseRadius = 70;
+      const maxRadius = 140;
+      const radius = (baseRadius + (maxRadius - baseRadius) * normalizedVolume) * pulseEffect;
 
-      rotation += 0.02;
+      // Enhanced glow effect with multiple layers
+      for (let glow = 0; glow < 4; glow++) {
+        const glowRadius = radius + glow * 25;
+        const glowOpacity = (1 - glow * 0.2) * normalizedVolume * 0.3;
+        
+        const glowGradient = ctx.createRadialGradient(
+          centerX, centerY, radius * 0.5,
+          centerX, centerY, glowRadius
+        );
+        
+        const glowColor = colorsRef.current.primary.replace('hsl', 'hsla').replace(')', `, ${glowOpacity})`);
+        glowGradient.addColorStop(0, glowColor);
+        glowGradient.addColorStop(1, 'hsla(0, 0%, 0%, 0)');
+        
+        ctx.fillStyle = glowGradient;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, glowRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
-      // Draw multiple layers for 3D effect
-      for (let layer = 0; layer < 3; layer++) {
-        const layerRadius = radius - layer * 20;
-        const opacity = 1 - layer * 0.3;
+      // Main sphere with enhanced 3D layers
+      for (let layer = 0; layer < 5; layer++) {
+        const layerRadius = radius - layer * 15;
+        const opacity = (1 - layer * 0.15) * (0.7 + normalizedVolume * 0.3);
 
-        // Create gradient
         const gradient = ctx.createRadialGradient(
-          centerX,
-          centerY,
+          centerX - layerRadius * 0.2,
+          centerY - layerRadius * 0.2,
           0,
           centerX,
           centerY,
@@ -90,59 +117,100 @@ export const VoiceVisualization = ({ isRecording, audioStream }: VoiceVisualizat
         );
 
         const primaryRgba = colorsRef.current.primary.replace('hsl', 'hsla').replace(')', `, ${opacity})`);
-        const accentRgba = colorsRef.current.accent.replace('hsl', 'hsla').replace(')', `, ${opacity * 0.7})`);
+        const accentRgba = colorsRef.current.accent.replace('hsl', 'hsla').replace(')', `, ${opacity * 0.8})`);
         const primaryTransparent = colorsRef.current.primary.replace('hsl', 'hsla').replace(')', ', 0)');
         
         gradient.addColorStop(0, primaryRgba);
-        gradient.addColorStop(0.5, accentRgba);
+        gradient.addColorStop(0.4, accentRgba);
+        gradient.addColorStop(0.7, primaryRgba);
         gradient.addColorStop(1, primaryTransparent);
 
         ctx.fillStyle = gradient;
         ctx.beginPath();
         ctx.arc(centerX, centerY, layerRadius, 0, Math.PI * 2);
         ctx.fill();
+      }
 
-        // Add particles around the sphere
-        const particles = 12;
-        for (let i = 0; i < particles; i++) {
-          const angle = (i / particles) * Math.PI * 2 + rotation;
-          const particleRadius = layerRadius + 30;
-          const px = centerX + Math.cos(angle) * particleRadius;
-          const py = centerY + Math.sin(angle) * particleRadius;
-          const size = 4 + normalizedVolume * 8;
+      // Enhanced orbital particles with trails
+      const particles = 16;
+      for (let i = 0; i < particles; i++) {
+        const angle = (i / particles) * Math.PI * 2 + rotation;
+        const orbitRadius = radius + 35 + Math.sin(rotation + i) * 10;
+        const px = centerX + Math.cos(angle) * orbitRadius;
+        const py = centerY + Math.sin(angle) * orbitRadius;
+        const size = 3 + normalizedVolume * 10;
 
-          const accentRgba = colorsRef.current.accent.replace('hsl', 'hsla').replace(')', `, ${opacity})`);
-          ctx.fillStyle = accentRgba;
+        // Particle glow
+        const particleGradient = ctx.createRadialGradient(px, py, 0, px, py, size * 2);
+        const accentRgba = colorsRef.current.accent.replace('hsl', 'hsla').replace(')', ', 0.8)');
+        const accentTransparent = colorsRef.current.accent.replace('hsl', 'hsla').replace(')', ', 0)');
+        particleGradient.addColorStop(0, accentRgba);
+        particleGradient.addColorStop(0.5, accentRgba);
+        particleGradient.addColorStop(1, accentTransparent);
+        
+        ctx.fillStyle = particleGradient;
+        ctx.beginPath();
+        ctx.arc(px, py, size * 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Inner particle core
+        ctx.fillStyle = colorsRef.current.accent;
+        ctx.beginPath();
+        ctx.arc(px, py, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Smooth frequency waves with multiple rings
+      const rings = 2;
+      for (let ring = 0; ring < rings; ring++) {
+        const bars = 48;
+        const barMaxHeight = 40 - ring * 10;
+        const ringOffset = ring * 35;
+
+        for (let i = 0; i < bars; i++) {
+          const angle = (i / bars) * Math.PI * 2 + rotation * (1 + ring * 0.5);
+          const dataIndex = Math.floor((i / bars) * bufferLength);
+          const barHeight = (dataArray[dataIndex] / 255) * barMaxHeight;
+
+          const innerRadius = radius + 25 + ringOffset;
+          const outerRadius = innerRadius + barHeight;
+
+          const x1 = centerX + Math.cos(angle) * innerRadius;
+          const y1 = centerY + Math.sin(angle) * innerRadius;
+          const x2 = centerX + Math.cos(angle) * outerRadius;
+          const y2 = centerY + Math.sin(angle) * outerRadius;
+
+          const barOpacity = 0.6 - ring * 0.2;
+          const primaryRgba = colorsRef.current.primary.replace('hsl', 'hsla').replace(')', `, ${barOpacity})`);
+          
+          // Bar with gradient
+          const barGradient = ctx.createLinearGradient(x1, y1, x2, y2);
+          barGradient.addColorStop(0, primaryRgba);
+          const accentRgba = colorsRef.current.accent.replace('hsl', 'hsla').replace(')', `, ${barOpacity})`);
+          barGradient.addColorStop(1, accentRgba);
+          
+          ctx.strokeStyle = barGradient;
+          ctx.lineWidth = 2.5;
+          ctx.lineCap = 'round';
           ctx.beginPath();
-          ctx.arc(px, py, size, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
         }
       }
 
-      // Add frequency bars in circular pattern
-      const bars = 32;
-      const barMaxHeight = 50;
-      for (let i = 0; i < bars; i++) {
-        const angle = (i / bars) * Math.PI * 2 + rotation;
-        const dataIndex = Math.floor((i / bars) * bufferLength);
-        const barHeight = (dataArray[dataIndex] / 255) * barMaxHeight;
-
-        const innerRadius = radius + 20;
-        const outerRadius = innerRadius + barHeight;
-
-        const x1 = centerX + Math.cos(angle) * innerRadius;
-        const y1 = centerY + Math.sin(angle) * innerRadius;
-        const x2 = centerX + Math.cos(angle) * outerRadius;
-        const y2 = centerY + Math.sin(angle) * outerRadius;
-
-        const primaryRgba = colorsRef.current.primary.replace('hsl', 'hsla').replace(')', ', 0.8)');
-        ctx.strokeStyle = primaryRgba;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-      }
+      // Inner glow accent
+      const innerGlow = ctx.createRadialGradient(
+        centerX, centerY, 0,
+        centerX, centerY, radius * 0.4
+      );
+      const innerGlowColor = colorsRef.current.accent.replace('hsl', 'hsla').replace(')', `, ${normalizedVolume * 0.5})`);
+      innerGlow.addColorStop(0, innerGlowColor);
+      innerGlow.addColorStop(1, 'hsla(0, 0%, 0%, 0)');
+      ctx.fillStyle = innerGlow;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius * 0.4, 0, Math.PI * 2);
+      ctx.fill();
     };
 
     draw();

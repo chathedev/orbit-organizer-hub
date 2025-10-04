@@ -3,26 +3,37 @@ import { Mic, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { RecordingView } from "./RecordingView";
-import { ProtocolGenerator } from "./ProtocolGenerator";
+import { AutoProtocolGenerator } from "./AutoProtocolGenerator";
 
 type View = "welcome" | "recording" | "protocol";
+
+interface AIProtocol {
+  title: string;
+  summary: string;
+  mainPoints: string[];
+  decisions: string[];
+  actionItems: string[];
+}
 
 export const TranscriptionInterface = () => {
   const [currentView, setCurrentView] = useState<View>("welcome");
   const [transcript, setTranscript] = useState("");
+  const [aiProtocol, setAiProtocol] = useState<AIProtocol | null>(null);
 
   const handleStartRecording = () => {
     setCurrentView("recording");
   };
 
-  const handleFinishRecording = (recordedTranscript: string) => {
-    setTranscript(recordedTranscript);
+  const handleFinishRecording = (data: { transcript: string; aiProtocol: AIProtocol | null }) => {
+    setTranscript(data.transcript);
+    setAiProtocol(data.aiProtocol);
     setCurrentView("protocol");
   };
 
   const handleBackToWelcome = () => {
     setCurrentView("welcome");
     setTranscript("");
+    setAiProtocol(null);
   };
 
   if (currentView === "recording") {
@@ -36,8 +47,9 @@ export const TranscriptionInterface = () => {
 
   if (currentView === "protocol") {
     return (
-      <ProtocolGenerator
+      <AutoProtocolGenerator
         transcript={transcript}
+        aiProtocol={aiProtocol}
         onBack={handleBackToWelcome}
       />
     );
