@@ -54,7 +54,7 @@ Om inga beslut eller action items finns, använd tomma arrayer.`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'llama-3.1-70b-versatile',
+        model: 'llama-3.3-70b-versatile',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Analysera denna mötestranskription:\n\n${transcript}` }
