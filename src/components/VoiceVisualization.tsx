@@ -9,6 +9,11 @@ export const VoiceVisualization = ({ isRecording, audioStream }: VoiceVisualizat
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>();
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const colorsRef = useRef<{ primary: string; accent: string; background: string }>({
+    primary: '',
+    accent: '',
+    background: ''
+  });
 
   useEffect(() => {
     if (!canvasRef.current || !audioStream || !isRecording) return;
@@ -16,6 +21,18 @@ export const VoiceVisualization = ({ isRecording, audioStream }: VoiceVisualizat
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+
+    // Get computed CSS colors
+    const styles = getComputedStyle(document.documentElement);
+    const primaryHsl = styles.getPropertyValue('--primary').trim();
+    const accentHsl = styles.getPropertyValue('--accent').trim();
+    const backgroundHsl = styles.getPropertyValue('--background').trim();
+    
+    colorsRef.current = {
+      primary: `hsl(${primaryHsl})`,
+      accent: `hsl(${accentHsl})`,
+      background: `hsl(${backgroundHsl})`
+    };
 
     const audioContext = new AudioContext();
     const analyser = audioContext.createAnalyser();
@@ -39,7 +56,7 @@ export const VoiceVisualization = ({ isRecording, audioStream }: VoiceVisualizat
       const width = canvas.width;
       const height = canvas.height;
 
-      ctx.fillStyle = "hsl(var(--background))";
+      ctx.fillStyle = colorsRef.current.background;
       ctx.fillRect(0, 0, width, height);
 
       // Calculate average volume
@@ -70,9 +87,13 @@ export const VoiceVisualization = ({ isRecording, audioStream }: VoiceVisualizat
           layerRadius
         );
 
-        gradient.addColorStop(0, `hsla(var(--primary), ${opacity})`);
-        gradient.addColorStop(0.5, `hsla(var(--accent), ${opacity * 0.7})`);
-        gradient.addColorStop(1, `hsla(var(--primary), 0)`);
+        const primaryRgba = colorsRef.current.primary.replace('hsl', 'hsla').replace(')', `, ${opacity})`);
+        const accentRgba = colorsRef.current.accent.replace('hsl', 'hsla').replace(')', `, ${opacity * 0.7})`);
+        const primaryTransparent = colorsRef.current.primary.replace('hsl', 'hsla').replace(')', ', 0)');
+        
+        gradient.addColorStop(0, primaryRgba);
+        gradient.addColorStop(0.5, accentRgba);
+        gradient.addColorStop(1, primaryTransparent);
 
         ctx.fillStyle = gradient;
         ctx.beginPath();
@@ -88,7 +109,8 @@ export const VoiceVisualization = ({ isRecording, audioStream }: VoiceVisualizat
           const py = centerY + Math.sin(angle) * particleRadius;
           const size = 4 + normalizedVolume * 8;
 
-          ctx.fillStyle = `hsla(var(--accent), ${opacity})`;
+          const accentRgba = colorsRef.current.accent.replace('hsl', 'hsla').replace(')', `, ${opacity})`);
+          ctx.fillStyle = accentRgba;
           ctx.beginPath();
           ctx.arc(px, py, size, 0, Math.PI * 2);
           ctx.fill();
@@ -111,7 +133,8 @@ export const VoiceVisualization = ({ isRecording, audioStream }: VoiceVisualizat
         const x2 = centerX + Math.cos(angle) * outerRadius;
         const y2 = centerY + Math.sin(angle) * outerRadius;
 
-        ctx.strokeStyle = `hsla(var(--primary), ${0.8})`;
+        const primaryRgba = colorsRef.current.primary.replace('hsl', 'hsla').replace(')', ', 0.8)');
+        ctx.strokeStyle = primaryRgba;
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(x1, y1);
