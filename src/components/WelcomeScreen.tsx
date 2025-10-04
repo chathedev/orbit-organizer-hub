@@ -1,12 +1,13 @@
 import { Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
-
 interface WelcomeScreenProps {
   onPermissionGranted: () => void;
   onPermissionDenied: () => void;
 }
-
-export const WelcomeScreen = ({ onPermissionGranted, onPermissionDenied }: WelcomeScreenProps) => {
+export const WelcomeScreen = ({
+  onPermissionGranted,
+  onPermissionDenied
+}: WelcomeScreenProps) => {
   const requestMicrophonePermission = async () => {
     try {
       // Be om både mikrofon OCH systemljud (desktop audio)
@@ -21,11 +22,11 @@ export const WelcomeScreen = ({ onPermissionGranted, onPermissionDenied }: Welco
       // Försök först med systemljud-capture om det stöds
       try {
         // @ts-ignore - Chrome experimentell funktion
-        await navigator.mediaDevices.getUserMedia({ 
+        await navigator.mediaDevices.getUserMedia({
           audio: {
             ...constraints.audio,
             // @ts-ignore
-            systemAudio: "include" 
+            systemAudio: "include"
           }
         });
       } catch (systemAudioError) {
@@ -33,16 +34,13 @@ export const WelcomeScreen = ({ onPermissionGranted, onPermissionDenied }: Welco
         console.log("Systemljud inte tillgängligt, använder endast mikrofon");
         await navigator.mediaDevices.getUserMedia(constraints);
       }
-
       onPermissionGranted();
     } catch (error) {
       console.error("Mikrofontillstånd nekades:", error);
       onPermissionDenied();
     }
   };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+  return <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="max-w-md w-full text-center space-y-8">
         <div className="space-y-4">
           <div className="w-20 h-20 mx-auto bg-primary/10 rounded-full flex items-center justify-center">
@@ -62,18 +60,14 @@ export const WelcomeScreen = ({ onPermissionGranted, onPermissionDenied }: Welco
           </h2>
           <ul className="text-sm text-muted-foreground space-y-2 text-left">
             <li>✓ Vi behöver tillgång till din mikrofon och systemljud</li>
-            <li>✓ Fångar både din röst och andra i mötet</li>
+            <li>✓ Fångar bara i möte personligt, inte via teams osv</li>
             <li>✓ Allt transkriberas lokalt i webbläsaren</li>
             <li>✓ Ingen data sparas eller skickas någonstans</li>
             <li>✓ Fungerar bäst i Chrome eller Edge</li>
           </ul>
         </div>
 
-        <Button 
-          onClick={requestMicrophonePermission}
-          size="lg"
-          className="w-full"
-        >
+        <Button onClick={requestMicrophonePermission} size="lg" className="w-full">
           <Mic className="mr-2" />
           Ge mikrofontillstånd
         </Button>
@@ -82,6 +76,5 @@ export const WelcomeScreen = ({ onPermissionGranted, onPermissionDenied }: Welco
           Du kan när som helst återkalla tillståndet i webbläsarens inställningar
         </p>
       </div>
-    </div>
-  );
+    </div>;
 };
