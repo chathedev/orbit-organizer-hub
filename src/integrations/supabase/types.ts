@@ -35,6 +35,36 @@ export type Database = {
         }
         Relationships: []
       }
+      meeting_sessions: {
+        Row: {
+          created_at: string
+          id: string
+          interim_transcript: string | null
+          is_paused: boolean | null
+          transcript: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          interim_transcript?: string | null
+          is_paused?: boolean | null
+          transcript?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          interim_transcript?: string | null
+          is_paused?: boolean | null
+          transcript?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

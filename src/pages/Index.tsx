@@ -1,30 +1,17 @@
-import { useState } from "react";
-import { WelcomeScreen } from "@/components/WelcomeScreen";
 import { TranscriptionInterface } from "@/components/TranscriptionInterface";
-import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 
 const Index = () => {
-  const [hasPermission, setHasPermission] = useState(false);
-  const { toast } = useToast();
+  const { isLoading } = useAuth();
 
-  const handlePermissionGranted = () => {
-    setHasPermission(true);
-  };
-
-  const handlePermissionDenied = () => {
-    toast({
-      title: "Mikrofontillstånd krävs",
-      description: "Vi behöver tillgång till din mikrofon för att transkribera. Uppdatera sidan och försök igen.",
-      variant: "destructive",
-    });
-  };
-
-  if (!hasPermission) {
+  if (isLoading) {
     return (
-      <WelcomeScreen 
-        onPermissionGranted={handlePermissionGranted}
-        onPermissionDenied={handlePermissionDenied}
-      />
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Laddar...</p>
+        </div>
+      </div>
     );
   }
 

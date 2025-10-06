@@ -3,6 +3,8 @@ import { Square, FileText, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { VoiceVisualization } from "./VoiceVisualization";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
 interface AIProtocol {
   title: string;
@@ -23,9 +25,12 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   const [transcript, setTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
   const [isGeneratingProtocol, setIsGeneratingProtocol] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
+  const { user } = useAuth();
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -96,6 +101,85 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       }
     };
   }, [toast, isPaused]);
+
+  // Auto-save session to database
+  useEffect(() => {
+    if (!user || !sessionId) return;
+
+    // Debounce saving to avoid too many writes
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      const { error } = await supabase
+        .from('meeting_sessions')
+        .update({
+          transcript,
+          interim_transcript: interimTranscript,
+          is_paused: isPaused,
+        })
+        .eq('id', sessionId);
+
+      if (error) {
+        console.error('Error saving session:', error);
+      }
+    }, 2000); // Save after 2 seconds of no changes
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [transcript, interimTranscript, isPaused, sessionId, user]);
+
+  // Load or create session
+  useEffect(() => {
+    const loadSession = async () => {
+      if (!user) return;
+
+      // Try to load an existing paused session
+      const { data: existingSession } = await supabase
+        .from('meeting_sessions')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('is_paused', true)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (existingSession) {
+        // Resume existing session
+        setSessionId(existingSession.id);
+        setTranscript(existingSession.transcript || '');
+        setInterimTranscript(existingSession.interim_transcript || '');
+        toast({
+          title: "Session återställd",
+          description: "Ditt tidigare möte har laddats in.",
+        });
+      } else {
+        // Create new session
+        const { data: newSession, error } = await supabase
+          .from('meeting_sessions')
+          .insert({
+            user_id: user.id,
+            transcript: '',
+            interim_transcript: '',
+            is_paused: false,
+          })
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Error creating session:', error);
+        } else {
+          setSessionId(newSession.id);
+        }
+      }
+    };
+
+    loadSession();
+  }, [user, toast]);
 
   useEffect(() => {
     const startRecording = async () => {
@@ -169,6 +253,18 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
 
   const stopRecording = async () => {
     setIsRecording(false);
+    
+    // Save final state before stopping
+    if (user && sessionId) {
+      await supabase
+        .from('meeting_sessions')
+        .update({
+          transcript,
+          interim_transcript: interimTranscript,
+          is_paused: false,
+        })
+        .eq('id', sessionId);
+    }
     
     if (recognitionRef.current) {
       recognitionRef.current.stop();
