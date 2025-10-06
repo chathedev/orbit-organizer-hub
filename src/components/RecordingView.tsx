@@ -140,8 +140,37 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     let cancelled = false;
 
     const initSession = async () => {
-      if (!user || sessionCreatedRef.current) return;
-      
+      if (!user) {
+        setIsLoadingSession(false);
+        return;
+      }
+
+      // If a load/create is already in progress, try to recover gracefully
+      if (sessionCreatedRef.current) {
+        if (sessionId) {
+          setIsLoadingSession(false);
+          return;
+        }
+        // Try to recover most recent session for user
+        const { data: recent, error: recentErr } = await supabase
+          .from('meeting_sessions')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!recentErr && recent) {
+          setSessionId(recent.id);
+          setTranscript(recent.transcript || '');
+          setInterimTranscript(recent.interim_transcript || '');
+          setIsPaused(recent.is_paused || false);
+          setIsLoadingSession(false);
+          return;
+        }
+        // Reset and proceed to create a new session
+        sessionCreatedRef.current = false;
+      }
+
       setIsLoadingSession(true);
 
       try {
@@ -275,7 +304,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         recognitionRef.current.stop();
       }
     };
-  }, [toast, onBack]);
+  }, [isLoadingSession, sessionId, isPaused, toast, onBack]);
 
   const togglePause = () => {
     if (isPaused) {
@@ -392,6 +421,21 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       setIsGeneratingProtocol(false);
     }
   };
+
+  // Safety timeout to avoid hanging in loading state
+  useEffect(() => {
+    if (!isLoadingSession) return;
+    const t = setTimeout(() => {
+      if (isLoadingSession) {
+        setIsLoadingSession(false);
+        if (!sessionId) {
+          toast({ title: "Fel", description: "Kunde inte starta session. Försök igen.", variant: "destructive" });
+          onBack();
+        }
+      }
+    }, 8000);
+    return () => clearTimeout(t);
+  }, [isLoadingSession, sessionId, toast, onBack]);
 
   if (isLoadingSession) {
     return (
