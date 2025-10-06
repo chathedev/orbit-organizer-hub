@@ -298,17 +298,6 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       });
       return;
     }
-
-    // Pause recording while saving
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
-    if (streamRef.current) {
-      streamRef.current.getAudioTracks().forEach(track => {
-        track.enabled = false;
-      });
-    }
-    setIsPaused(true);
     
     // Save to database
     const { error } = await supabase
@@ -330,20 +319,6 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         description: "Kunde inte spara till biblioteket. Försök igen.",
         variant: "destructive",
       });
-      // Resume recording
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.start();
-        } catch (e) {
-          console.error('Error resuming:', e);
-        }
-      }
-      if (streamRef.current) {
-        streamRef.current.getAudioTracks().forEach(track => {
-          track.enabled = true;
-        });
-      }
-      setIsPaused(false);
     } else {
       toast({
         title: "Sparat!",
@@ -560,7 +535,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
             size="lg"
             variant="default"
             className="px-6"
-            disabled={isGeneratingProtocol || !hasSpoken}
+            disabled={isGeneratingProtocol || !hasSpoken || !isPaused}
           >
             <FileText className="mr-2 h-4 w-4" />
             Spara i bibliotek
