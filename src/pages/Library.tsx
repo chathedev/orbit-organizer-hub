@@ -1,130 +1,101 @@
-import { useEffect, useState } from "react";
-import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/integrations/supabase/client";
+import { useState, useEffect } from "react";
+import { getMeetings, deleteMeeting, getFolders, addFolder, deleteFolder, saveMeeting, type Meeting } from "@/utils/localStorage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useNavigate } from "react-router-dom";
-import { Play, Clock, Calendar, Trash2 } from "lucide-react";
+import { Play, Calendar, Trash2, FolderPlus, X, Edit2, Check, Folder } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { BottomNav } from "@/components/BottomNav";
-
-interface MeetingSession {
-  id: string;
-  transcript: string | null;
-  interim_transcript: string | null;
-  created_at: string;
-  updated_at: string;
-  is_paused: boolean | null;
-}
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const Library = () => {
-  const { user, isLoading } = useAuth();
-  const [sessions, setSessions] = useState<MeetingSession[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
+  const [selectedFolder, setSelectedFolder] = useState<string>("Alla");
+  const [newFolderName, setNewFolderName] = useState("");
+  const [isAddingFolder, setIsAddingFolder] = useState(false);
+  const [editingMeetingId, setEditingMeetingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
   const navigate = useNavigate();
   const { toast } = useToast();
 
   useEffect(() => {
-    if (!isLoading && !user) {
-      navigate("/auth");
-    }
-  }, [user, isLoading, navigate]);
+    loadData();
+  }, []);
 
-  useEffect(() => {
-    if (user) {
-      loadSessions();
-    }
-  }, [user]);
-
-  const loadSessions = async () => {
-    if (!user) return;
-
-    setLoading(true);
-    
-    // First, clean up only true duplicates (same minute AND empty)
-    const { data: allSessions } = await supabase
-      .from("meeting_sessions")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
-
-    if (allSessions && allSessions.length > 1) {
-      // Group by minute to find duplicates
-      const sessionsByMinute = new Map<string, typeof allSessions>();
-      
-      allSessions.forEach(session => {
-        const minute = new Date(session.created_at).toISOString().slice(0, 16);
-        const existing = sessionsByMinute.get(minute) || [];
-        sessionsByMinute.set(minute, [...existing, session]);
-      });
-
-      // Find duplicates: multiple empty sessions in same minute
-      const duplicateIds: string[] = [];
-      sessionsByMinute.forEach((sessions) => {
-        if (sessions.length > 1) {
-          const emptySessions = sessions.filter(s => !s.transcript || s.transcript.trim() === '');
-          // Keep the newest one, delete the rest
-          if (emptySessions.length > 1) {
-            emptySessions.slice(1).forEach(s => duplicateIds.push(s.id));
-          }
-        }
-      });
-
-      // Delete only actual duplicates
-      if (duplicateIds.length > 0) {
-        await supabase
-          .from("meeting_sessions")
-          .delete()
-          .in("id", duplicateIds);
-      }
-    }
-
-    // Load fresh list - include paused sessions and any with text
-    const { data, error } = await supabase
-      .from("meeting_sessions")
-      .select("*")
-      .eq("user_id", user.id)
-      .or("and(transcript.not.is.null,transcript.neq.),and(interim_transcript.not.is.null,interim_transcript.neq.),is_paused.eq.true")
-      .order("updated_at", { ascending: false });
-
-    if (error) {
-      console.error("Error loading sessions:", error);
-      toast({
-        title: "Fel",
-        description: "Kunde inte ladda möten",
-        variant: "destructive",
-      });
-    } else {
-      setSessions(data || []);
-    }
-    setLoading(false);
+  const loadData = () => {
+    setMeetings(getMeetings());
+    setFolders(getFolders());
   };
 
-  const deleteSession = async (sessionId: string) => {
-    const { error } = await supabase
-      .from("meeting_sessions")
-      .delete()
-      .eq("id", sessionId);
-
-    if (error) {
-      toast({
-        title: "Fel",
-        description: "Kunde inte ta bort mötet",
-        variant: "destructive",
-      });
-    } else {
-      toast({
-        title: "Borttaget",
-        description: "Mötet har tagits bort",
-      });
-      loadSessions();
-    }
+  const handleDeleteMeeting = (id: string) => {
+    deleteMeeting(id);
+    toast({
+      title: "Borttaget",
+      description: "Mötet har tagits bort",
+    });
+    loadData();
   };
 
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  const handleAddFolder = () => {
+    if (!newFolderName.trim()) return;
+    addFolder(newFolderName);
+    setNewFolderName("");
+    setIsAddingFolder(false);
+    loadData();
+    toast({
+      title: "Mapp skapad",
+      description: `Mappen "${newFolderName}" har skapats`,
+    });
+  };
+
+  const handleDeleteFolder = (folder: string) => {
+    if (folder === "Allmänt") {
+      toast({
+        title: "Kan inte ta bort",
+        description: "Standardmappen kan inte tas bort",
+        variant: "destructive",
+      });
+      return;
+    }
+    deleteFolder(folder);
+    loadData();
+    toast({
+      title: "Mapp borttagen",
+      description: "Möten flyttades till Allmänt",
+    });
+  };
+
+  const handleStartEdit = (meeting: Meeting) => {
+    setEditingMeetingId(meeting.id);
+    setEditName(meeting.name);
+  };
+
+  const handleSaveEdit = (meeting: Meeting) => {
+    if (!editName.trim()) {
+      setEditName(meeting.name);
+      setEditingMeetingId(null);
+      return;
+    }
+    const updated = { ...meeting, name: editName, updatedAt: new Date().toISOString() };
+    saveMeeting(updated);
+    setEditingMeetingId(null);
+    loadData();
+    toast({
+      title: "Sparat",
+      description: "Mötesnamnet har uppdaterats",
+    });
+  };
+
+  const handleMoveToFolder = (meeting: Meeting, newFolder: string) => {
+    const updated = { ...meeting, folder: newFolder, updatedAt: new Date().toISOString() };
+    saveMeeting(updated);
+    loadData();
+    toast({
+      title: "Flyttat",
+      description: `Mötet har flyttats till "${newFolder}"`,
+    });
   };
 
   const formatDate = (dateString: string) => {
@@ -138,30 +109,15 @@ const Library = () => {
     }).format(date);
   };
 
-  if (isLoading || loading) {
-    return (
-      <div className="min-h-screen bg-background flex flex-col">
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Laddar möten...</p>
-          </div>
-        </div>
-        <BottomNav />
-      </div>
-    );
-  }
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-background flex flex-col">
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-muted-foreground">Loggar in...</p>
-        </div>
-        <BottomNav />
-      </div>
-    );
-  }
+  const filteredMeetings = selectedFolder === "Alla" 
+    ? meetings 
+    : meetings.filter(m => m.folder === selectedFolder);
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -175,25 +131,119 @@ const Library = () => {
       </div>
 
       <div className="max-w-4xl mx-auto px-4 py-8">
-        {sessions.length === 0 ? (
+        {/* Folder Management */}
+        <div className="mb-6 space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              variant={selectedFolder === "Alla" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSelectedFolder("Alla")}
+            >
+              Alla möten ({meetings.length})
+            </Button>
+            {folders.map(folder => (
+              <div key={folder} className="flex items-center gap-1">
+                <Button
+                  variant={selectedFolder === folder ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setSelectedFolder(folder)}
+                >
+                  <Folder className="w-3 h-3 mr-1" />
+                  {folder} ({meetings.filter(m => m.folder === folder).length})
+                </Button>
+                {folder !== "Allmänt" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDeleteFolder(folder)}
+                    className="h-8 w-8 p-0"
+                  >
+                    <X className="w-3 h-3" />
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {isAddingFolder ? (
+            <div className="flex gap-2">
+              <Input
+                placeholder="Mappnamn..."
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddFolder()}
+                autoFocus
+              />
+              <Button onClick={handleAddFolder} size="sm">
+                <Check className="w-4 h-4" />
+              </Button>
+              <Button onClick={() => {
+                setIsAddingFolder(false);
+                setNewFolderName("");
+              }} variant="ghost" size="sm">
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          ) : (
+            <Button onClick={() => setIsAddingFolder(true)} variant="outline" size="sm">
+              <FolderPlus className="w-4 h-4 mr-2" />
+              Ny mapp
+            </Button>
+          )}
+        </div>
+
+        {/* Meetings List */}
+        {filteredMeetings.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-muted-foreground mb-4">Inga möten ännu</p>
+            <p className="text-muted-foreground mb-4">
+              {selectedFolder === "Alla" ? "Inga möten ännu" : `Inga möten i "${selectedFolder}"`}
+            </p>
             <Button onClick={() => navigate("/")}>Spela in ett möte</Button>
           </div>
         ) : (
           <div className="grid gap-4">
-            {sessions.map((session) => (
-              <Card key={session.id} className="hover:shadow-lg transition-shadow">
+            {filteredMeetings.map((meeting) => (
+              <Card key={meeting.id} className="hover:shadow-lg transition-shadow">
                 <CardHeader>
-                  <div className="flex items-start justify-between">
+                  <div className="flex items-start justify-between gap-2">
                     <div className="flex-1">
-                      <CardTitle className="text-lg">Möte</CardTitle>
-                      <CardDescription className="mt-2 flex items-center gap-4 text-xs">
+                      {editingMeetingId === meeting.id ? (
+                        <div className="flex gap-2">
+                          <Input
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleSaveEdit(meeting)}
+                            autoFocus
+                          />
+                          <Button onClick={() => handleSaveEdit(meeting)} size="sm">
+                            <Check className="w-4 h-4" />
+                          </Button>
+                          <Button onClick={() => setEditingMeetingId(null)} variant="ghost" size="sm">
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-lg">{meeting.name}</CardTitle>
+                          <Button
+                            onClick={() => handleStartEdit(meeting)}
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      )}
+                      <CardDescription className="mt-2 flex items-center gap-4 text-xs flex-wrap">
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
-                          {formatDate(session.updated_at)}
+                          {formatDate(meeting.updatedAt)}
                         </span>
-                        {session.is_paused && (
+                        <span>
+                          {formatDuration(meeting.durationSeconds)}
+                        </span>
+                        {meeting.isPaused && (
                           <span className="bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded text-xs font-medium">
                             Pausad
                           </span>
@@ -204,19 +254,34 @@ const Library = () => {
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
-                    {session.transcript || session.interim_transcript || "Ingen transkription ännu..."}
+                    {meeting.transcript || meeting.interimTranscript || "Ingen transkription ännu..."}
                   </p>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap items-center">
                     <Button
-                      onClick={() => navigate("/?session=" + session.id)}
+                      onClick={() => navigate("/?session=" + meeting.id)}
                       size="sm"
                       variant="default"
                     >
                       <Play className="w-4 h-4 mr-1" />
                       Fortsätt
                     </Button>
+                    <Select value={meeting.folder} onValueChange={(value) => handleMoveToFolder(meeting, value)}>
+                      <SelectTrigger className="w-[140px] h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {folders.map(folder => (
+                          <SelectItem key={folder} value={folder}>
+                            <div className="flex items-center gap-2">
+                              <Folder className="w-3 h-3" />
+                              {folder}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <Button
-                      onClick={() => deleteSession(session.id)}
+                      onClick={() => handleDeleteMeeting(meeting.id)}
                       size="sm"
                       variant="destructive"
                     >

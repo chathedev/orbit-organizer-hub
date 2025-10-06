@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from "react";
-import { Square, FileText, Pause, Play } from "lucide-react";
+import { Square, FileText, Pause, Play, Edit2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { VoiceVisualization } from "./VoiceVisualization";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
+import { saveMeeting, getMeeting, getFolders, type Meeting } from "@/utils/localStorage";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface AIProtocol {
   title: string;
@@ -25,17 +26,17 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   const [transcript, setTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
   const [isGeneratingProtocol, setIsGeneratingProtocol] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [isLoadingSession, setIsLoadingSession] = useState(true);
+  const [sessionId, setSessionId] = useState<string>("");
+  const [meetingName, setMeetingName] = useState("Namnlöst möte");
+  const [selectedFolder, setSelectedFolder] = useState("Allmänt");
+  const [isEditingName, setIsEditingName] = useState(false);
   const [hasSpoken, setHasSpoken] = useState(false);
   const [durationSec, setDurationSec] = useState(0);
   const recognitionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const sessionCreatedRef = useRef(false); // Prevent duplicate creation
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
-  const { user } = useAuth();
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -108,169 +109,67 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     };
   }, [toast, isPaused]);
 
-  // Auto-save session to database
+  // Auto-save to localStorage
   useEffect(() => {
-    if (!user || !sessionId) return;
+    if (!sessionId) return;
 
-    // Debounce saving to avoid too many writes
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
 
-    saveTimeoutRef.current = setTimeout(async () => {
-      const { error } = await supabase
-        .from('meeting_sessions')
-        .update({
-          transcript,
-          interim_transcript: interimTranscript,
-          is_paused: isPaused,
-          duration_seconds: durationSec,
-        })
-        .eq('id', sessionId);
-
-      if (error) {
-        console.error('Error saving session:', error);
-      }
-    }, 2000); // Save after 2 seconds of no changes
+    saveTimeoutRef.current = setTimeout(() => {
+      const meeting: Meeting = {
+        id: sessionId,
+        name: meetingName,
+        folder: selectedFolder,
+        transcript,
+        interimTranscript,
+        isPaused,
+        durationSeconds: durationSec,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      saveMeeting(meeting);
+    }, 1000);
 
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [transcript, interimTranscript, isPaused, durationSec, sessionId, user]);
+  }, [transcript, interimTranscript, isPaused, durationSec, sessionId, meetingName, selectedFolder]);
 
-  // Load or create session ONCE when component mounts
+  // Load or create session from localStorage
   useEffect(() => {
-    let cancelled = false;
+    const urlParams = new URLSearchParams(window.location.search);
+    const existingSessionId = urlParams.get('session');
 
-    const initSession = async () => {
-      if (!user) {
-        setIsLoadingSession(false);
+    if (existingSessionId) {
+      const existing = getMeeting(existingSessionId);
+      if (existing) {
+        setSessionId(existing.id);
+        setMeetingName(existing.name);
+        setSelectedFolder(existing.folder);
+        setTranscript(existing.transcript);
+        setInterimTranscript(existing.interimTranscript);
+        setIsPaused(existing.isPaused);
+        setDurationSec(existing.durationSeconds);
+        toast({
+          title: "Möte återställt",
+          description: `Fortsätter "${existing.name}"`,
+        });
+        window.history.replaceState({}, '', '/');
         return;
       }
+    }
 
-      // If a load/create is already in progress, try to recover gracefully
-      if (sessionCreatedRef.current) {
-        if (sessionId) {
-          setIsLoadingSession(false);
-          return;
-        }
-        // Try to recover most recent session for user
-        const { data: recent, error: recentErr } = await supabase
-          .from('meeting_sessions')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (!recentErr && recent) {
-          setSessionId(recent.id);
-          setTranscript(recent.transcript || '');
-          setInterimTranscript(recent.interim_transcript || '');
-          setIsPaused(recent.is_paused || false);
-          setIsLoadingSession(false);
-          return;
-        }
-        // Reset and proceed to create a new session
-        sessionCreatedRef.current = false;
-      }
-
-      setIsLoadingSession(true);
-
-      try {
-        // Check URL params for existing session ID
-        const urlParams = new URLSearchParams(window.location.search);
-        const existingSessionId = urlParams.get('session');
-
-        if (existingSessionId) {
-          // Load specific session from library
-          const { data: existingSession, error } = await supabase
-            .from('meeting_sessions')
-            .select('*')
-            .eq('id', existingSessionId)
-            .eq('user_id', user.id)
-            .maybeSingle();
-
-          if (!error && existingSession && !cancelled) {
-            sessionCreatedRef.current = true;
-            setSessionId(existingSession.id);
-            setTranscript(existingSession.transcript || '');
-            setInterimTranscript(existingSession.interim_transcript || '');
-            setIsPaused(existingSession.is_paused || false);
-            toast({
-              title: "Session återställd",
-              description: "Fortsätter från ditt tidigare möte.",
-            });
-            // Clear the URL param
-            window.history.replaceState({}, '', '/');
-            setIsLoadingSession(false);
-            return;
-          }
-        }
-
-        if (cancelled) return;
-
-        // Create new session (mark as created immediately to prevent duplicates)
-        sessionCreatedRef.current = true;
-        
-        const { data: newSession, error } = await supabase
-          .from('meeting_sessions')
-          .insert({
-            user_id: user.id,
-            transcript: '',
-            interim_transcript: '',
-            is_paused: false,
-          })
-          .select()
-          .single();
-
-        if (cancelled) {
-          // If cancelled, delete the session we just created
-          if (newSession?.id) {
-            await supabase.from('meeting_sessions').delete().eq('id', newSession.id);
-          }
-          return;
-        }
-
-        if (error) {
-          console.error('Error creating session:', error);
-          sessionCreatedRef.current = false;
-          toast({
-            title: "Fel",
-            description: "Kunde inte skapa session",
-            variant: "destructive",
-          });
-          onBack();
-        } else {
-          setSessionId(newSession.id);
-        }
-      } catch (error) {
-        console.error('Session init error:', error);
-        if (!cancelled) {
-          toast({
-            title: "Fel",
-            description: "Kunde inte starta session",
-            variant: "destructive",
-          });
-          onBack();
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingSession(false);
-        }
-      }
-    };
-
-    initSession();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user, toast, onBack]);
+    // Create new session
+    const newId = `meeting-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    setSessionId(newId);
+  }, [toast]);
 
   useEffect(() => {
-    if (isLoadingSession || !sessionId) return;
+    if (!sessionId) return;
 
     const startRecording = async () => {
       try {
@@ -309,7 +208,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         recognitionRef.current.stop();
       }
     };
-  }, [isLoadingSession, sessionId, isPaused, toast, onBack]);
+  }, [sessionId, isPaused, toast, onBack]);
 
   // Track duration while recording
   useEffect(() => {
@@ -324,70 +223,37 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     };
   }, [isRecording, isPaused]);
 
-  // Delete empty sessions on unmount (no speech recorded)
-  useEffect(() => {
-    return () => {
-      if (sessionId && !hasSpoken && (!transcript.trim() && !interimTranscript.trim())) {
-        supabase.from('meeting_sessions').delete().eq('id', sessionId);
-      }
-    };
-  }, [sessionId, hasSpoken, transcript, interimTranscript]);
 
-  const togglePause = async () => {
-    if (!sessionId) {
-      setIsPaused((p) => !p);
-      return;
-    }
-    try {
-      if (isPaused) {
-        // Resume
-        if (recognitionRef.current) {
-          try {
-            recognitionRef.current.start();
-          } catch (error) {
-            console.error('Error resuming recognition:', error);
-          }
+  const togglePause = () => {
+    if (isPaused) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+        } catch (error) {
+          console.error('Error resuming recognition:', error);
         }
-        if (streamRef.current) {
-          streamRef.current.getAudioTracks().forEach(track => {
-            track.enabled = true;
-          });
-        }
-        setIsPaused(false);
-        await supabase.from('meeting_sessions').update({ is_paused: false, duration_seconds: durationSec }).eq('id', sessionId);
-      } else {
-        // Pause and mute
-        if (recognitionRef.current) {
-          recognitionRef.current.stop();
-        }
-        if (streamRef.current) {
-          streamRef.current.getAudioTracks().forEach(track => {
-            track.enabled = false;
-          });
-        }
-        setIsPaused(true);
-        await supabase.from('meeting_sessions').update({ is_paused: true, duration_seconds: durationSec }).eq('id', sessionId);
       }
-    } catch (e) {
-      console.error('Pause toggle save failed:', e);
+      if (streamRef.current) {
+        streamRef.current.getAudioTracks().forEach(track => {
+          track.enabled = true;
+        });
+      }
+      setIsPaused(false);
+    } else {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      if (streamRef.current) {
+        streamRef.current.getAudioTracks().forEach(track => {
+          track.enabled = false;
+        });
+      }
+      setIsPaused(true);
     }
   };
 
   const stopRecording = async () => {
     setIsRecording(false);
-    
-    // Save final state before stopping
-    if (user && sessionId) {
-      await supabase
-        .from('meeting_sessions')
-        .update({
-          transcript,
-          interim_transcript: interimTranscript,
-          is_paused: false,
-          duration_seconds: durationSec,
-        })
-        .eq('id', sessionId);
-    }
     
     if (recognitionRef.current) {
       recognitionRef.current.stop();
@@ -401,9 +267,6 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     const fullTranscript = transcript + interimTranscript;
     
     if (!fullTranscript.trim()) {
-      if (sessionId) {
-        await supabase.from('meeting_sessions').delete().eq('id', sessionId);
-      }
       toast({
         title: "Ingen text",
         description: "Ingen transkription inspelad.",
@@ -412,6 +275,20 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       onBack();
       return;
     }
+    
+    // Final save
+    const meeting: Meeting = {
+      id: sessionId,
+      name: meetingName,
+      folder: selectedFolder,
+      transcript: fullTranscript,
+      interimTranscript: '',
+      isPaused: false,
+      durationSeconds: durationSec,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    saveMeeting(meeting);
 
     // Generate AI protocol
     setIsGeneratingProtocol(true);
@@ -463,31 +340,8 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     }
   };
 
-  // Safety timeout to avoid hanging in loading state
-  useEffect(() => {
-    if (!isLoadingSession) return;
-    const t = setTimeout(() => {
-      if (isLoadingSession) {
-        setIsLoadingSession(false);
-        if (!sessionId) {
-          toast({ title: "Fel", description: "Kunde inte starta session. Försök igen.", variant: "destructive" });
-          onBack();
-        }
-      }
-    }, 8000);
-    return () => clearTimeout(t);
-  }, [isLoadingSession, sessionId, toast, onBack]);
 
-  if (isLoadingSession) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Förbereder inspelning...</p>
-        </div>
-      </div>
-    );
-  }
+  const folders = getFolders();
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-20">
@@ -505,6 +359,61 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
 
       {/* Content */}
       <div className="flex-1 flex flex-col items-center p-8 max-w-4xl mx-auto w-full">
+        {/* Meeting Info */}
+        <div className="w-full bg-card rounded-lg border border-border p-4 mb-6">
+          <div className="flex gap-4 items-center flex-wrap">
+            <div className="flex-1 min-w-[200px]">
+              <label className="text-xs text-muted-foreground mb-1 block">Mötesnamn</label>
+              {isEditingName ? (
+                <div className="flex gap-2">
+                  <Input
+                    value={meetingName}
+                    onChange={(e) => setMeetingName(e.target.value)}
+                    onBlur={() => setIsEditingName(false)}
+                    onKeyDown={(e) => e.key === "Enter" && setIsEditingName(false)}
+                    autoFocus
+                    className="h-9"
+                  />
+                  <Button onClick={() => setIsEditingName(false)} size="sm">
+                    <Check className="w-4 h-4" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{meetingName}</span>
+                  <Button
+                    onClick={() => setIsEditingName(true)}
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                  >
+                    <Edit2 className="w-3 h-3" />
+                  </Button>
+                </div>
+              )}
+            </div>
+            <div className="min-w-[160px]">
+              <label className="text-xs text-muted-foreground mb-1 block">Mapp</label>
+              <Select value={selectedFolder} onValueChange={setSelectedFolder}>
+                <SelectTrigger className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {folders.map(folder => (
+                    <SelectItem key={folder} value={folder}>{folder}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Varaktighet</label>
+              <span className="text-sm font-medium block">
+                {Math.floor(durationSec / 60)}:{(durationSec % 60).toString().padStart(2, '0')}
+              </span>
+            </div>
+          </div>
+        </div>
+
         {/* Real-time transcript display */}
         <div className="w-full bg-card rounded-lg border border-border p-6 mb-8 min-h-[300px] max-h-[500px] overflow-y-auto">
           <h2 className="text-lg font-semibold text-card-foreground mb-4 flex items-center gap-2">
