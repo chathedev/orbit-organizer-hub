@@ -3,9 +3,10 @@ import { Square, FileText, Pause, Play, Edit2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { VoiceVisualization } from "./VoiceVisualization";
 import { useToast } from "@/hooks/use-toast";
-import { saveMeeting, getMeeting, getFolders, type Meeting } from "@/utils/localStorage";
+import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useState as useStateHook, useEffect as useEffectHook } from "react";
 
 interface AIProtocol {
   title: string;
@@ -109,7 +110,20 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     };
   }, [toast, isPaused]);
 
-  // Auto-save to localStorage
+  // Load available folders
+  const [folders, setFolders] = useState<string[]>([]);
+  
+  useEffect(() => {
+    const loadFolders = async () => {
+      const { data } = await supabase.from('meeting_folders').select('name').order('name');
+      if (data) {
+        setFolders(data.map(f => f.name));
+      }
+    };
+    loadFolders();
+  }, []);
+
+  // Auto-save to database
   useEffect(() => {
     if (!sessionId) return;
 
@@ -117,19 +131,18 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       clearTimeout(saveTimeoutRef.current);
     }
 
-    saveTimeoutRef.current = setTimeout(() => {
-      const meeting: Meeting = {
-        id: sessionId,
-        name: meetingName,
-        folder: selectedFolder,
-        transcript,
-        interimTranscript,
-        isPaused,
-        durationSeconds: durationSec,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      saveMeeting(meeting);
+    saveTimeoutRef.current = setTimeout(async () => {
+      await supabase
+        .from('meeting_sessions')
+        .update({
+          name: meetingName,
+          folder: selectedFolder,
+          transcript,
+          interim_transcript: interimTranscript,
+          is_paused: isPaused,
+          duration_seconds: durationSec,
+        })
+        .eq('id', sessionId);
     }, 1000);
 
     return () => {
@@ -139,33 +152,55 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     };
   }, [transcript, interimTranscript, isPaused, durationSec, sessionId, meetingName, selectedFolder]);
 
-  // Load or create session from localStorage
+  // Load or create session from database
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const existingSessionId = urlParams.get('session');
+    const initSession = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const existingSessionId = urlParams.get('session');
 
-    if (existingSessionId) {
-      const existing = getMeeting(existingSessionId);
-      if (existing) {
-        setSessionId(existing.id);
-        setMeetingName(existing.name);
-        setSelectedFolder(existing.folder);
-        setTranscript(existing.transcript);
-        setInterimTranscript(existing.interimTranscript);
-        setIsPaused(existing.isPaused);
-        setDurationSec(existing.durationSeconds);
-        toast({
-          title: "Möte återställt",
-          description: `Fortsätter "${existing.name}"`,
-        });
-        window.history.replaceState({}, '', '/');
-        return;
+      if (existingSessionId) {
+        const { data: existing } = await supabase
+          .from('meeting_sessions')
+          .select('*')
+          .eq('id', existingSessionId)
+          .single();
+          
+        if (existing) {
+          setSessionId(existing.id);
+          setMeetingName(existing.name || 'Namnlöst möte');
+          setSelectedFolder(existing.folder || 'Allmänt');
+          setTranscript(existing.transcript || '');
+          setInterimTranscript(existing.interim_transcript || '');
+          setIsPaused(existing.is_paused || false);
+          setDurationSec(existing.duration_seconds || 0);
+          toast({
+            title: "Möte återställt",
+            description: `Fortsätter "${existing.name}"`,
+          });
+          window.history.replaceState({}, '', '/');
+          return;
+        }
       }
-    }
 
-    // Create new session
-    const newId = `meeting-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    setSessionId(newId);
+      // Create new session
+      const { data: newSession } = await supabase
+        .from('meeting_sessions')
+        .insert({
+          name: 'Namnlöst möte',
+          folder: 'Allmänt',
+          transcript: '',
+          interim_transcript: '',
+          is_paused: false,
+        })
+        .select()
+        .single();
+        
+      if (newSession) {
+        setSessionId(newSession.id);
+      }
+    };
+
+    initSession();
   }, [toast]);
 
   useEffect(() => {
@@ -267,6 +302,9 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     const fullTranscript = transcript + interimTranscript;
     
     if (!fullTranscript.trim()) {
+      if (sessionId) {
+        await supabase.from('meeting_sessions').delete().eq('id', sessionId);
+      }
       toast({
         title: "Ingen text",
         description: "Ingen transkription inspelad.",
@@ -277,18 +315,17 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     }
     
     // Final save
-    const meeting: Meeting = {
-      id: sessionId,
-      name: meetingName,
-      folder: selectedFolder,
-      transcript: fullTranscript,
-      interimTranscript: '',
-      isPaused: false,
-      durationSeconds: durationSec,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    saveMeeting(meeting);
+    await supabase
+      .from('meeting_sessions')
+      .update({
+        name: meetingName,
+        folder: selectedFolder,
+        transcript: fullTranscript,
+        interim_transcript: '',
+        is_paused: false,
+        duration_seconds: durationSec,
+      })
+      .eq('id', sessionId);
 
     // Generate AI protocol
     setIsGeneratingProtocol(true);
@@ -341,7 +378,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   };
 
 
-  const folders = getFolders();
+  const getFoldersSync = () => folders;
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-20">

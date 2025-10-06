@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getMeetings, deleteMeeting, getFolders, addFolder, deleteFolder, saveMeeting, type Meeting } from "@/utils/localStorage";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,18 @@ import { Play, Calendar, Trash2, FolderPlus, X, Edit2, Check, Folder } from "luc
 import { useToast } from "@/hooks/use-toast";
 import { BottomNav } from "@/components/BottomNav";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+interface Meeting {
+  id: string;
+  name: string;
+  folder: string;
+  transcript: string;
+  interim_transcript: string;
+  is_paused: boolean;
+  duration_seconds: number;
+  created_at: string;
+  updated_at: string;
+}
 
 const Library = () => {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -24,13 +36,32 @@ const Library = () => {
     loadData();
   }, []);
 
-  const loadData = () => {
-    setMeetings(getMeetings());
-    setFolders(getFolders());
+  const loadData = async () => {
+    // Load meetings
+    const { data: meetingsData } = await supabase
+      .from('meeting_sessions')
+      .select('*')
+      .not('transcript', 'is', null)
+      .neq('transcript', '')
+      .order('updated_at', { ascending: false });
+    
+    if (meetingsData) {
+      setMeetings(meetingsData);
+    }
+
+    // Load folders
+    const { data: foldersData } = await supabase
+      .from('meeting_folders')
+      .select('name')
+      .order('name');
+    
+    if (foldersData) {
+      setFolders(foldersData.map(f => f.name));
+    }
   };
 
-  const handleDeleteMeeting = (id: string) => {
-    deleteMeeting(id);
+  const handleDeleteMeeting = async (id: string) => {
+    await supabase.from('meeting_sessions').delete().eq('id', id);
     toast({
       title: "Borttaget",
       description: "Mötet har tagits bort",
@@ -38,9 +69,22 @@ const Library = () => {
     loadData();
   };
 
-  const handleAddFolder = () => {
+  const handleAddFolder = async () => {
     if (!newFolderName.trim()) return;
-    addFolder(newFolderName);
+    
+    const { error } = await supabase
+      .from('meeting_folders')
+      .insert({ name: newFolderName });
+    
+    if (error) {
+      toast({
+        title: "Fel",
+        description: "Mappen finns redan",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setNewFolderName("");
     setIsAddingFolder(false);
     loadData();
@@ -50,7 +94,7 @@ const Library = () => {
     });
   };
 
-  const handleDeleteFolder = (folder: string) => {
+  const handleDeleteFolder = async (folder: string) => {
     if (folder === "Allmänt") {
       toast({
         title: "Kan inte ta bort",
@@ -59,7 +103,19 @@ const Library = () => {
       });
       return;
     }
-    deleteFolder(folder);
+
+    // Move meetings to Allmänt
+    await supabase
+      .from('meeting_sessions')
+      .update({ folder: 'Allmänt' })
+      .eq('folder', folder);
+
+    // Delete folder
+    await supabase
+      .from('meeting_folders')
+      .delete()
+      .eq('name', folder);
+
     loadData();
     toast({
       title: "Mapp borttagen",
@@ -72,14 +128,18 @@ const Library = () => {
     setEditName(meeting.name);
   };
 
-  const handleSaveEdit = (meeting: Meeting) => {
+  const handleSaveEdit = async (meeting: Meeting) => {
     if (!editName.trim()) {
       setEditName(meeting.name);
       setEditingMeetingId(null);
       return;
     }
-    const updated = { ...meeting, name: editName, updatedAt: new Date().toISOString() };
-    saveMeeting(updated);
+
+    await supabase
+      .from('meeting_sessions')
+      .update({ name: editName })
+      .eq('id', meeting.id);
+
     setEditingMeetingId(null);
     loadData();
     toast({
@@ -88,9 +148,12 @@ const Library = () => {
     });
   };
 
-  const handleMoveToFolder = (meeting: Meeting, newFolder: string) => {
-    const updated = { ...meeting, folder: newFolder, updatedAt: new Date().toISOString() };
-    saveMeeting(updated);
+  const handleMoveToFolder = async (meeting: Meeting, newFolder: string) => {
+    await supabase
+      .from('meeting_sessions')
+      .update({ folder: newFolder })
+      .eq('id', meeting.id);
+
     loadData();
     toast({
       title: "Flyttat",
@@ -238,12 +301,12 @@ const Library = () => {
                       <CardDescription className="mt-2 flex items-center gap-4 text-xs flex-wrap">
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
-                          {formatDate(meeting.updatedAt)}
+                          {formatDate(meeting.updated_at)}
                         </span>
                         <span>
-                          {formatDuration(meeting.durationSeconds)}
+                          {formatDuration(meeting.duration_seconds)}
                         </span>
-                        {meeting.isPaused && (
+                        {meeting.is_paused && (
                           <span className="bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded text-xs font-medium">
                             Pausad
                           </span>
@@ -254,7 +317,7 @@ const Library = () => {
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
-                    {meeting.transcript || meeting.interimTranscript || "Ingen transkription ännu..."}
+                    {meeting.transcript || meeting.interim_transcript || "Ingen transkription ännu..."}
                   </p>
                   <div className="flex gap-2 flex-wrap items-center">
                     <Button

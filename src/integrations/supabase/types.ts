@@ -35,33 +35,63 @@ export type Database = {
         }
         Relationships: []
       }
+      meeting_folders: {
+        Row: {
+          created_at: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
       meeting_sessions: {
         Row: {
           created_at: string
+          duration_seconds: number | null
+          folder: string | null
           id: string
           interim_transcript: string | null
           is_paused: boolean | null
+          name: string | null
+          title: string | null
           transcript: string | null
           updated_at: string
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           created_at?: string
+          duration_seconds?: number | null
+          folder?: string | null
           id?: string
           interim_transcript?: string | null
           is_paused?: boolean | null
+          name?: string | null
+          title?: string | null
           transcript?: string | null
           updated_at?: string
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           created_at?: string
+          duration_seconds?: number | null
+          folder?: string | null
           id?: string
           interim_transcript?: string | null
           is_paused?: boolean | null
+          name?: string | null
+          title?: string | null
           transcript?: string | null
           updated_at?: string
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: []
       }
