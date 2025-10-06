@@ -84,6 +84,7 @@ const Library = () => {
       .from("meeting_sessions")
       .select("*")
       .eq("user_id", user.id)
+      .neq("transcript", "")
       .order("updated_at", { ascending: false });
 
     if (error) {

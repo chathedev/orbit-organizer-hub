@@ -27,10 +27,13 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   const [isGeneratingProtocol, setIsGeneratingProtocol] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
+  const [hasSpoken, setHasSpoken] = useState(false);
+  const [durationSec, setDurationSec] = useState(0);
   const recognitionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const sessionCreatedRef = useRef(false); // Prevent duplicate creation
+  const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -67,6 +70,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       if (final) {
         setTranscript(prev => prev + final);
         setInterimTranscript('');
+        setHasSpoken(true);
       }
       
       if (interim) {
@@ -120,6 +124,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
           transcript,
           interim_transcript: interimTranscript,
           is_paused: isPaused,
+          duration_seconds: durationSec,
         })
         .eq('id', sessionId);
 
@@ -133,7 +138,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [transcript, interimTranscript, isPaused, sessionId, user]);
+  }, [transcript, interimTranscript, isPaused, durationSec, sessionId, user]);
 
   // Load or create session ONCE when component mounts
   useEffect(() => {
@@ -306,33 +311,65 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     };
   }, [isLoadingSession, sessionId, isPaused, toast, onBack]);
 
-  const togglePause = () => {
-    if (isPaused) {
-      // Resume
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.start();
-        } catch (error) {
-          console.error('Error resuming recognition:', error);
-        }
-      }
-      if (streamRef.current) {
-        streamRef.current.getAudioTracks().forEach(track => {
-          track.enabled = true;
-        });
-      }
-      setIsPaused(false);
+  // Track duration while recording
+  useEffect(() => {
+    if (isRecording && !isPaused) {
+      if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = setInterval(() => setDurationSec((s) => s + 1), 1000);
     } else {
-      // Pause and mute
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
+      if (durationIntervalRef.current) { clearInterval(durationIntervalRef.current); durationIntervalRef.current = null; }
+    }
+    return () => {
+      if (durationIntervalRef.current) { clearInterval(durationIntervalRef.current); durationIntervalRef.current = null; }
+    };
+  }, [isRecording, isPaused]);
+
+  // Delete empty sessions on unmount (no speech recorded)
+  useEffect(() => {
+    return () => {
+      if (sessionId && !hasSpoken && (!transcript.trim() && !interimTranscript.trim())) {
+        supabase.from('meeting_sessions').delete().eq('id', sessionId);
       }
-      if (streamRef.current) {
-        streamRef.current.getAudioTracks().forEach(track => {
-          track.enabled = false;
-        });
+    };
+  }, [sessionId, hasSpoken, transcript, interimTranscript]);
+
+  const togglePause = async () => {
+    if (!sessionId) {
+      setIsPaused((p) => !p);
+      return;
+    }
+    try {
+      if (isPaused) {
+        // Resume
+        if (recognitionRef.current) {
+          try {
+            recognitionRef.current.start();
+          } catch (error) {
+            console.error('Error resuming recognition:', error);
+          }
+        }
+        if (streamRef.current) {
+          streamRef.current.getAudioTracks().forEach(track => {
+            track.enabled = true;
+          });
+        }
+        setIsPaused(false);
+        await supabase.from('meeting_sessions').update({ is_paused: false, duration_seconds: durationSec }).eq('id', sessionId);
+      } else {
+        // Pause and mute
+        if (recognitionRef.current) {
+          recognitionRef.current.stop();
+        }
+        if (streamRef.current) {
+          streamRef.current.getAudioTracks().forEach(track => {
+            track.enabled = false;
+          });
+        }
+        setIsPaused(true);
+        await supabase.from('meeting_sessions').update({ is_paused: true, duration_seconds: durationSec }).eq('id', sessionId);
       }
-      setIsPaused(true);
+    } catch (e) {
+      console.error('Pause toggle save failed:', e);
     }
   };
 
@@ -347,6 +384,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
           transcript,
           interim_transcript: interimTranscript,
           is_paused: false,
+          duration_seconds: durationSec,
         })
         .eq('id', sessionId);
     }
@@ -363,6 +401,9 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     const fullTranscript = transcript + interimTranscript;
     
     if (!fullTranscript.trim()) {
+      if (sessionId) {
+        await supabase.from('meeting_sessions').delete().eq('id', sessionId);
+      }
       toast({
         title: "Ingen text",
         description: "Ingen transkription inspelad.",
