@@ -287,6 +287,71 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     }
   };
 
+  const saveToLibrary = async () => {
+    const fullTranscript = transcript + interimTranscript;
+    
+    if (!fullTranscript.trim()) {
+      toast({
+        title: "Ingen text",
+        description: "Ingen transkription inspelad än.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Pause recording while saving
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    if (streamRef.current) {
+      streamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = false;
+      });
+    }
+    setIsPaused(true);
+    
+    // Save to database
+    const { error } = await supabase
+      .from('meeting_sessions')
+      .update({
+        name: meetingName,
+        folder: selectedFolder,
+        transcript: fullTranscript,
+        interim_transcript: '',
+        is_paused: true,
+        duration_seconds: durationSec,
+      })
+      .eq('id', sessionId);
+
+    if (error) {
+      console.error('Error saving to library:', error);
+      toast({
+        title: "Fel vid sparning",
+        description: "Kunde inte spara till biblioteket. Försök igen.",
+        variant: "destructive",
+      });
+      // Resume recording
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+        } catch (e) {
+          console.error('Error resuming:', e);
+        }
+      }
+      if (streamRef.current) {
+        streamRef.current.getAudioTracks().forEach(track => {
+          track.enabled = true;
+        });
+      }
+      setIsPaused(false);
+    } else {
+      toast({
+        title: "Sparat!",
+        description: `"${meetingName}" har sparats i biblioteket under ${selectedFolder}.`,
+      });
+    }
+  };
+
   const stopRecording = async () => {
     setIsRecording(false);
     
@@ -470,35 +535,45 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         </div>
 
         {/* Control buttons */}
-        <div className="flex gap-4">
+        <div className="flex gap-3 flex-wrap justify-center">
           <Button
             onClick={togglePause}
             size="lg"
             variant="secondary"
-            className="px-8"
+            className="px-6"
             disabled={isGeneratingProtocol}
           >
             {isPaused ? (
               <>
-                <Play className="mr-2" />
+                <Play className="mr-2 h-4 w-4" />
                 Återuppta
               </>
             ) : (
               <>
-                <Pause className="mr-2" />
+                <Pause className="mr-2 h-4 w-4" />
                 Pausa
               </>
             )}
           </Button>
           <Button
+            onClick={saveToLibrary}
+            size="lg"
+            variant="default"
+            className="px-6"
+            disabled={isGeneratingProtocol || !hasSpoken}
+          >
+            <FileText className="mr-2 h-4 w-4" />
+            Spara i bibliotek
+          </Button>
+          <Button
             onClick={stopRecording}
             size="lg"
             variant="destructive"
-            className="px-8"
+            className="px-6"
             disabled={isGeneratingProtocol}
           >
-            <Square className="mr-2" />
-            {isGeneratingProtocol ? "Genererar AI-protokoll..." : "Stoppa & skapa protokoll"}
+            <Square className="mr-2 h-4 w-4" />
+            {isGeneratingProtocol ? "Genererar..." : "Stoppa & skapa protokoll"}
           </Button>
         </div>
 
