@@ -11,6 +11,7 @@ import { BottomNav } from "@/components/BottomNav";
 interface MeetingSession {
   id: string;
   transcript: string | null;
+  interim_transcript: string | null;
   created_at: string;
   updated_at: string;
   is_paused: boolean | null;
@@ -80,11 +81,11 @@ const Library = () => {
 
     // Load fresh list - but don't filter out empty sessions anymore
     // They might be actively being recorded
-    const { data, error } = await supabase
+const { data, error } = await supabase
       .from("meeting_sessions")
       .select("*")
       .eq("user_id", user.id)
-      .neq("transcript", "")
+      .or("transcript.neq.,interim_transcript.neq.")
       .order("updated_at", { ascending: false });
 
     if (error) {
@@ -204,7 +205,7 @@ const Library = () => {
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
-                    {session.transcript || "Ingen transkription ännu..."}
+                    {session.transcript || session.interim_transcript || "Ingen transkription ännu..."}
                   </p>
                   <div className="flex gap-2">
                     <Button
