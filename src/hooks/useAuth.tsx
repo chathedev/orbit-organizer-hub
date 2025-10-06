@@ -17,27 +17,12 @@ export const useAuth = () => {
       }
     );
 
-    // Check for existing session or sign in anonymously
-    const initAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session) {
-        setSession(session);
-        setUser(session.user);
-      } else {
-        // Auto sign in anonymously if no session exists
-        const { data, error } = await supabase.auth.signInAnonymously();
-        if (error) {
-          console.error('Error signing in anonymously:', error);
-        } else {
-          setSession(data.session);
-          setUser(data.user);
-        }
-      }
+    // Check for existing session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
       setIsLoading(false);
-    };
-
-    initAuth();
+    });
 
     return () => subscription.unsubscribe();
   }, []);

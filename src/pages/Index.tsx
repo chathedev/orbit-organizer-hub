@@ -1,8 +1,17 @@
 import { TranscriptionInterface } from "@/components/TranscriptionInterface";
 import { useAuth } from "@/hooks/useAuth";
+import { useNavigate } from "react-router-dom";
+import { useEffect } from "react";
 
 const Index = () => {
-  const { isLoading } = useAuth();
+  const { user, isLoading } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isLoading && !user) {
+      navigate("/auth");
+    }
+  }, [user, isLoading, navigate]);
 
   if (isLoading) {
     return (
@@ -13,6 +22,10 @@ const Index = () => {
         </div>
       </div>
     );
+  }
+
+  if (!user) {
+    return null;
   }
 
   return <TranscriptionInterface />;
