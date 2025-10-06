@@ -40,39 +40,46 @@ const Library = () => {
 
     setLoading(true);
     
-    // First, clean up duplicate empty sessions
+    // First, clean up only true duplicates (same minute AND empty)
     const { data: allSessions } = await supabase
       .from("meeting_sessions")
       .select("*")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
-    if (allSessions && allSessions.length > 0) {
-      // Group sessions by similarity (same minute, empty transcript)
-      const emptyDuplicates: string[] = [];
-      const seenMinutes = new Set<string>();
+    if (allSessions && allSessions.length > 1) {
+      // Group by minute to find duplicates
+      const sessionsByMinute = new Map<string, typeof allSessions>();
       
       allSessions.forEach(session => {
         const minute = new Date(session.created_at).toISOString().slice(0, 16);
-        const isEmpty = !session.transcript || session.transcript.trim() === '';
-        
-        if (isEmpty && seenMinutes.has(minute)) {
-          emptyDuplicates.push(session.id);
-        } else if (isEmpty) {
-          seenMinutes.add(minute);
+        const existing = sessionsByMinute.get(minute) || [];
+        sessionsByMinute.set(minute, [...existing, session]);
+      });
+
+      // Find duplicates: multiple empty sessions in same minute
+      const duplicateIds: string[] = [];
+      sessionsByMinute.forEach((sessions) => {
+        if (sessions.length > 1) {
+          const emptySessions = sessions.filter(s => !s.transcript || s.transcript.trim() === '');
+          // Keep the newest one, delete the rest
+          if (emptySessions.length > 1) {
+            emptySessions.slice(1).forEach(s => duplicateIds.push(s.id));
+          }
         }
       });
 
-      // Delete duplicates
-      if (emptyDuplicates.length > 0) {
+      // Delete only actual duplicates
+      if (duplicateIds.length > 0) {
         await supabase
           .from("meeting_sessions")
           .delete()
-          .in("id", emptyDuplicates);
+          .in("id", duplicateIds);
       }
     }
 
-    // Load fresh list
+    // Load fresh list - but don't filter out empty sessions anymore
+    // They might be actively being recorded
     const { data, error } = await supabase
       .from("meeting_sessions")
       .select("*")
@@ -87,11 +94,7 @@ const Library = () => {
         variant: "destructive",
       });
     } else {
-      // Filter out completely empty sessions
-      const filteredSessions = (data || []).filter(
-        session => session.transcript && session.transcript.trim() !== ''
-      );
-      setSessions(filteredSessions);
+      setSessions(data || []);
     }
     setLoading(false);
   };

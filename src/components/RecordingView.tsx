@@ -137,10 +137,11 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
 
   // Load or create session ONCE when component mounts
   useEffect(() => {
+    let cancelled = false;
+
     const initSession = async () => {
       if (!user || sessionCreatedRef.current) return;
       
-      sessionCreatedRef.current = true;
       setIsLoadingSession(true);
 
       try {
@@ -157,7 +158,8 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
             .eq('user_id', user.id)
             .maybeSingle();
 
-          if (!error && existingSession) {
+          if (!error && existingSession && !cancelled) {
+            sessionCreatedRef.current = true;
             setSessionId(existingSession.id);
             setTranscript(existingSession.transcript || '');
             setInterimTranscript(existingSession.interim_transcript || '');
@@ -173,31 +175,11 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
           }
         }
 
-        // Clean up any empty duplicate sessions before creating new one
-        const { data: existingSessions } = await supabase
-          .from('meeting_sessions')
-          .select('id, transcript, created_at')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false });
+        if (cancelled) return;
 
-        // Delete empty sessions created in the last minute (likely duplicates)
-        if (existingSessions) {
-          const now = new Date();
-          const recentEmptySessions = existingSessions.filter(session => {
-            const createdAt = new Date(session.created_at);
-            const ageInSeconds = (now.getTime() - createdAt.getTime()) / 1000;
-            return (!session.transcript || session.transcript.trim() === '') && ageInSeconds < 60;
-          });
-
-          if (recentEmptySessions.length > 0) {
-            await supabase
-              .from('meeting_sessions')
-              .delete()
-              .in('id', recentEmptySessions.map(s => s.id));
-          }
-        }
-
-        // Create new session
+        // Create new session (mark as created immediately to prevent duplicates)
+        sessionCreatedRef.current = true;
+        
         const { data: newSession, error } = await supabase
           .from('meeting_sessions')
           .insert({
@@ -209,8 +191,17 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
           .select()
           .single();
 
+        if (cancelled) {
+          // If cancelled, delete the session we just created
+          if (newSession?.id) {
+            await supabase.from('meeting_sessions').delete().eq('id', newSession.id);
+          }
+          return;
+        }
+
         if (error) {
           console.error('Error creating session:', error);
+          sessionCreatedRef.current = false;
           toast({
             title: "Fel",
             description: "Kunde inte skapa session",
@@ -222,18 +213,26 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         }
       } catch (error) {
         console.error('Session init error:', error);
-        toast({
-          title: "Fel",
-          description: "Kunde inte starta session",
-          variant: "destructive",
-        });
-        onBack();
+        if (!cancelled) {
+          toast({
+            title: "Fel",
+            description: "Kunde inte starta session",
+            variant: "destructive",
+          });
+          onBack();
+        }
       } finally {
-        setIsLoadingSession(false);
+        if (!cancelled) {
+          setIsLoadingSession(false);
+        }
       }
     };
 
     initSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, [user, toast, onBack]);
 
   useEffect(() => {
