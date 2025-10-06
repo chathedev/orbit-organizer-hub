@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Square, FileText } from "lucide-react";
+import { Square, FileText, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { VoiceVisualization } from "./VoiceVisualization";
 import { useToast } from "@/hooks/use-toast";
@@ -19,6 +19,7 @@ interface RecordingViewProps {
 
 export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
   const [isGeneratingProtocol, setIsGeneratingProtocol] = useState(false);
@@ -68,7 +69,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
 
     recognition.onend = () => {
       console.log('Recognition ended, restarting...');
-      if (isRecording && recognitionRef.current) {
+      if (isRecording && !isPaused && recognitionRef.current) {
         try {
           recognitionRef.current.start();
         } catch (error) {
@@ -94,7 +95,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         recognitionRef.current.stop();
       }
     };
-  }, [toast]);
+  }, [toast, isPaused]);
 
   useEffect(() => {
     const startRecording = async () => {
@@ -135,6 +136,36 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       }
     };
   }, [toast, onBack]);
+
+  const togglePause = () => {
+    if (isPaused) {
+      // Resume
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+        } catch (error) {
+          console.error('Error resuming recognition:', error);
+        }
+      }
+      if (streamRef.current) {
+        streamRef.current.getAudioTracks().forEach(track => {
+          track.enabled = true;
+        });
+      }
+      setIsPaused(false);
+    } else {
+      // Pause and mute
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      if (streamRef.current) {
+        streamRef.current.getAudioTracks().forEach(track => {
+          track.enabled = false;
+        });
+      }
+      setIsPaused(true);
+    }
+  };
 
   const stopRecording = async () => {
     setIsRecording(false);
@@ -245,6 +276,25 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         {/* Control buttons */}
         <div className="flex gap-4">
           <Button
+            onClick={togglePause}
+            size="lg"
+            variant="secondary"
+            className="px-8"
+            disabled={isGeneratingProtocol}
+          >
+            {isPaused ? (
+              <>
+                <Play className="mr-2" />
+                Återuppta
+              </>
+            ) : (
+              <>
+                <Pause className="mr-2" />
+                Pausa
+              </>
+            )}
+          </Button>
+          <Button
             onClick={stopRecording}
             size="lg"
             variant="destructive"
@@ -258,9 +308,9 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
 
         {/* Recording indicator */}
         <div className="mt-6 flex items-center gap-2 px-4 py-2 bg-primary/10 rounded-md">
-          <div className="w-3 h-3 bg-primary rounded-full animate-pulse" />
+          <div className={`w-3 h-3 bg-primary rounded-full ${!isPaused && 'animate-pulse'}`} />
           <span className="text-sm font-medium text-primary">
-            {isGeneratingProtocol ? "Genererar detaljerat protokoll med AI..." : "Spelar in..."}
+            {isGeneratingProtocol ? "Genererar detaljerat protokoll med AI..." : isPaused ? "Pausad (mikrofon avstängd)" : "Spelar in..."}
           </span>
         </div>
       </div>
