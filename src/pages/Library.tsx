@@ -79,13 +79,12 @@ const Library = () => {
       }
     }
 
-    // Load fresh list - but don't filter out empty sessions anymore
-    // They might be actively being recorded
-const { data, error } = await supabase
+    // Load fresh list - include paused sessions and any with text
+    const { data, error } = await supabase
       .from("meeting_sessions")
       .select("*")
       .eq("user_id", user.id)
-      .or("transcript.neq.,interim_transcript.neq.")
+      .or("and(transcript.not.is.null,transcript.neq.),and(interim_transcript.not.is.null,interim_transcript.neq.),is_paused.eq.true")
       .order("updated_at", { ascending: false });
 
     if (error) {
