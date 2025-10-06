@@ -2,6 +2,7 @@ import { TranscriptionInterface } from "@/components/TranscriptionInterface";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import { useEffect } from "react";
+import { BottomNav } from "@/components/BottomNav";
 
 const Index = () => {
   const { user, isLoading } = useAuth();
@@ -28,7 +29,12 @@ const Index = () => {
     return null;
   }
 
-  return <TranscriptionInterface />;
+  return (
+    <>
+      <TranscriptionInterface />
+      <BottomNav />
+    </>
+  );
 };
 
 export default Index;
