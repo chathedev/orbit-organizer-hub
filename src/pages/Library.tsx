@@ -39,6 +39,40 @@ const Library = () => {
     if (!user) return;
 
     setLoading(true);
+    
+    // First, clean up duplicate empty sessions
+    const { data: allSessions } = await supabase
+      .from("meeting_sessions")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (allSessions && allSessions.length > 0) {
+      // Group sessions by similarity (same minute, empty transcript)
+      const emptyDuplicates: string[] = [];
+      const seenMinutes = new Set<string>();
+      
+      allSessions.forEach(session => {
+        const minute = new Date(session.created_at).toISOString().slice(0, 16);
+        const isEmpty = !session.transcript || session.transcript.trim() === '';
+        
+        if (isEmpty && seenMinutes.has(minute)) {
+          emptyDuplicates.push(session.id);
+        } else if (isEmpty) {
+          seenMinutes.add(minute);
+        }
+      });
+
+      // Delete duplicates
+      if (emptyDuplicates.length > 0) {
+        await supabase
+          .from("meeting_sessions")
+          .delete()
+          .in("id", emptyDuplicates);
+      }
+    }
+
+    // Load fresh list
     const { data, error } = await supabase
       .from("meeting_sessions")
       .select("*")
@@ -53,7 +87,11 @@ const Library = () => {
         variant: "destructive",
       });
     } else {
-      setSessions(data || []);
+      // Filter out completely empty sessions
+      const filteredSessions = (data || []).filter(
+        session => session.transcript && session.transcript.trim() !== ''
+      );
+      setSessions(filteredSessions);
     }
     setLoading(false);
   };

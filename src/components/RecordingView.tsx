@@ -26,9 +26,11 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   const [interimTranscript, setInterimTranscript] = useState("");
   const [isGeneratingProtocol, setIsGeneratingProtocol] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isLoadingSession, setIsLoadingSession] = useState(true);
   const recognitionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const sessionCreatedRef = useRef(false); // Prevent duplicate creation
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -135,64 +137,108 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
 
   // Load or create session ONCE when component mounts
   useEffect(() => {
-    const loadSession = async () => {
-      if (!user) return;
+    const initSession = async () => {
+      if (!user || sessionCreatedRef.current) return;
+      
+      sessionCreatedRef.current = true;
+      setIsLoadingSession(true);
 
-      // Check URL params for existing session ID
-      const urlParams = new URLSearchParams(window.location.search);
-      const existingSessionId = urlParams.get('session');
+      try {
+        // Check URL params for existing session ID
+        const urlParams = new URLSearchParams(window.location.search);
+        const existingSessionId = urlParams.get('session');
 
-      if (existingSessionId) {
-        // Load specific session from library
-        const { data: existingSession, error } = await supabase
+        if (existingSessionId) {
+          // Load specific session from library
+          const { data: existingSession, error } = await supabase
+            .from('meeting_sessions')
+            .select('*')
+            .eq('id', existingSessionId)
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+          if (!error && existingSession) {
+            setSessionId(existingSession.id);
+            setTranscript(existingSession.transcript || '');
+            setInterimTranscript(existingSession.interim_transcript || '');
+            setIsPaused(existingSession.is_paused || false);
+            toast({
+              title: "Session återställd",
+              description: "Fortsätter från ditt tidigare möte.",
+            });
+            // Clear the URL param
+            window.history.replaceState({}, '', '/');
+            setIsLoadingSession(false);
+            return;
+          }
+        }
+
+        // Clean up any empty duplicate sessions before creating new one
+        const { data: existingSessions } = await supabase
           .from('meeting_sessions')
-          .select('*')
-          .eq('id', existingSessionId)
+          .select('id, transcript, created_at')
           .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        // Delete empty sessions created in the last minute (likely duplicates)
+        if (existingSessions) {
+          const now = new Date();
+          const recentEmptySessions = existingSessions.filter(session => {
+            const createdAt = new Date(session.created_at);
+            const ageInSeconds = (now.getTime() - createdAt.getTime()) / 1000;
+            return (!session.transcript || session.transcript.trim() === '') && ageInSeconds < 60;
+          });
+
+          if (recentEmptySessions.length > 0) {
+            await supabase
+              .from('meeting_sessions')
+              .delete()
+              .in('id', recentEmptySessions.map(s => s.id));
+          }
+        }
+
+        // Create new session
+        const { data: newSession, error } = await supabase
+          .from('meeting_sessions')
+          .insert({
+            user_id: user.id,
+            transcript: '',
+            interim_transcript: '',
+            is_paused: false,
+          })
+          .select()
           .single();
 
-        if (!error && existingSession) {
-          setSessionId(existingSession.id);
-          setTranscript(existingSession.transcript || '');
-          setInterimTranscript(existingSession.interim_transcript || '');
+        if (error) {
+          console.error('Error creating session:', error);
           toast({
-            title: "Session återställd",
-            description: "Ditt tidigare möte har laddats in.",
+            title: "Fel",
+            description: "Kunde inte skapa session",
+            variant: "destructive",
           });
-          // Clear the URL param
-          window.history.replaceState({}, '', '/');
-          return;
+          onBack();
+        } else {
+          setSessionId(newSession.id);
         }
-      }
-
-      // Create new session only if no existing session ID
-      const { data: newSession, error } = await supabase
-        .from('meeting_sessions')
-        .insert({
-          user_id: user.id,
-          transcript: '',
-          interim_transcript: '',
-          is_paused: false,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Error creating session:', error);
+      } catch (error) {
+        console.error('Session init error:', error);
         toast({
           title: "Fel",
-          description: "Kunde inte skapa session",
+          description: "Kunde inte starta session",
           variant: "destructive",
         });
-      } else {
-        setSessionId(newSession.id);
+        onBack();
+      } finally {
+        setIsLoadingSession(false);
       }
     };
 
-    loadSession();
-  }, [user, toast]);
+    initSession();
+  }, [user, toast, onBack]);
 
   useEffect(() => {
+    if (isLoadingSession || !sessionId) return;
+
     const startRecording = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -205,7 +251,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
 
         streamRef.current = stream;
         
-        if (recognitionRef.current) {
+        if (recognitionRef.current && !isPaused) {
           recognitionRef.current.start();
           setIsRecording(true);
         }
@@ -348,14 +394,27 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     }
   };
 
+  if (isLoadingSession) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Förbereder inspelning...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col pb-20">
       {/* Header */}
       <div className="border-b border-border bg-card">
         <div className="max-w-4xl mx-auto px-4 py-6">
-          <h1 className="text-2xl font-bold text-card-foreground">Spelar in möte</h1>
+          <h1 className="text-2xl font-bold text-card-foreground">
+            {isPaused ? "Möte pausat" : "Spelar in möte"}
+          </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Prata fritt • Texten visas direkt i realtid
+            {isPaused ? "Tryck återuppta för att fortsätta" : "Prata fritt • Texten visas direkt i realtid"}
           </p>
         </div>
       </div>
