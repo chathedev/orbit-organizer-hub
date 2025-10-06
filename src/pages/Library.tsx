@@ -98,10 +98,12 @@ const Library = () => {
 
   if (isLoading || loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center pb-20">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Laddar...</p>
+      <div className="min-h-screen bg-background flex flex-col">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Laddar möten...</p>
+          </div>
         </div>
         <BottomNav />
       </div>
@@ -109,7 +111,14 @@ const Library = () => {
   }
 
   if (!user) {
-    return null;
+    return (
+      <div className="min-h-screen bg-background flex flex-col">
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-muted-foreground">Loggar in...</p>
+        </div>
+        <BottomNav />
+      </div>
+    );
   }
 
   return (

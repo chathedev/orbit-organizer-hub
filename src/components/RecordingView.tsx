@@ -133,48 +133,59 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     };
   }, [transcript, interimTranscript, isPaused, sessionId, user]);
 
-  // Load or create session
+  // Load or create session ONCE when component mounts
   useEffect(() => {
     const loadSession = async () => {
       if (!user) return;
 
-      // Try to load an existing paused session
-      const { data: existingSession } = await supabase
-        .from('meeting_sessions')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('is_paused', true)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .single();
+      // Check URL params for existing session ID
+      const urlParams = new URLSearchParams(window.location.search);
+      const existingSessionId = urlParams.get('session');
 
-      if (existingSession) {
-        // Resume existing session
-        setSessionId(existingSession.id);
-        setTranscript(existingSession.transcript || '');
-        setInterimTranscript(existingSession.interim_transcript || '');
-        toast({
-          title: "Session återställd",
-          description: "Ditt tidigare möte har laddats in.",
-        });
-      } else {
-        // Create new session
-        const { data: newSession, error } = await supabase
+      if (existingSessionId) {
+        // Load specific session from library
+        const { data: existingSession, error } = await supabase
           .from('meeting_sessions')
-          .insert({
-            user_id: user.id,
-            transcript: '',
-            interim_transcript: '',
-            is_paused: false,
-          })
-          .select()
+          .select('*')
+          .eq('id', existingSessionId)
+          .eq('user_id', user.id)
           .single();
 
-        if (error) {
-          console.error('Error creating session:', error);
-        } else {
-          setSessionId(newSession.id);
+        if (!error && existingSession) {
+          setSessionId(existingSession.id);
+          setTranscript(existingSession.transcript || '');
+          setInterimTranscript(existingSession.interim_transcript || '');
+          toast({
+            title: "Session återställd",
+            description: "Ditt tidigare möte har laddats in.",
+          });
+          // Clear the URL param
+          window.history.replaceState({}, '', '/');
+          return;
         }
+      }
+
+      // Create new session only if no existing session ID
+      const { data: newSession, error } = await supabase
+        .from('meeting_sessions')
+        .insert({
+          user_id: user.id,
+          transcript: '',
+          interim_transcript: '',
+          is_paused: false,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error creating session:', error);
+        toast({
+          title: "Fel",
+          description: "Kunde inte skapa session",
+          variant: "destructive",
+        });
+      } else {
+        setSessionId(newSession.id);
       }
     };
 
