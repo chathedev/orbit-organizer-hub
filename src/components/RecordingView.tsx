@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Square, FileText, Pause, Play, Edit2, Check } from "lucide-react";
+import { Square, FileText, Pause, Play, Edit2, Check, Mic, MicOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { VoiceVisualization } from "./VoiceVisualization";
 import { useToast } from "@/hooks/use-toast";
@@ -24,6 +24,7 @@ interface RecordingViewProps {
 export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
   const [isGeneratingProtocol, setIsGeneratingProtocol] = useState(false);
@@ -33,10 +34,13 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [hasSpoken, setHasSpoken] = useState(false);
   const [durationSec, setDurationSec] = useState(0);
+  const [shouldStartRecording, setShouldStartRecording] = useState(false);
   const recognitionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const wakeLockRef = useRef<any>(null);
+  const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -82,12 +86,18 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
 
     recognition.onend = () => {
       console.log('Recognition ended, restarting...');
-      if (isRecording && !isPaused && recognitionRef.current) {
-        try {
-          recognitionRef.current.start();
-        } catch (error) {
-          console.error('Error restarting recognition:', error);
-        }
+      if (isRecording && !isPaused && !isMuted && recognitionRef.current) {
+        // Add slight delay before restart to prevent rapid fire restarts
+        if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+        restartTimeoutRef.current = setTimeout(() => {
+          try {
+            if (recognitionRef.current && isRecording && !isPaused && !isMuted) {
+              recognitionRef.current.start();
+            }
+          } catch (error) {
+            console.error('Error restarting recognition:', error);
+          }
+        }, 100);
       }
     };
 
@@ -107,8 +117,11 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       if (recognitionRef.current) {
         recognitionRef.current.stop();
       }
+      if (restartTimeoutRef.current) {
+        clearTimeout(restartTimeoutRef.current);
+      }
     };
-  }, [toast, isPaused]);
+  }, [toast, isPaused, isMuted, isRecording]);
 
   // Load available folders
   const [folders, setFolders] = useState<string[]>([]);
@@ -171,8 +184,9 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
           setSelectedFolder(existing.folder || 'Allmänt');
           setTranscript(existing.transcript || '');
           setInterimTranscript(existing.interim_transcript || '');
-          setIsPaused(existing.is_paused || false);
+          setIsPaused(false); // Auto-start when continuing
           setDurationSec(existing.duration_seconds || 0);
+          setShouldStartRecording(true); // Flag to auto-start
           toast({
             title: "Möte återställt",
             description: `Fortsätter "${existing.name}"`,
@@ -182,7 +196,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         }
       }
 
-      // Create new session
+      // Create new session and auto-start
       const { data: newSession } = await supabase
         .from('meeting_sessions')
         .insert({
@@ -197,6 +211,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         
       if (newSession) {
         setSessionId(newSession.id);
+        setShouldStartRecording(true);
       }
     };
 
@@ -204,7 +219,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   }, [toast]);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !shouldStartRecording) return;
 
     const startRecording = async () => {
       try {
@@ -218,7 +233,17 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
 
         streamRef.current = stream;
         
-        if (recognitionRef.current && !isPaused) {
+        // Request wake lock to keep screen on
+        if ('wakeLock' in navigator) {
+          try {
+            wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+            console.log('Wake Lock activated');
+          } catch (err) {
+            console.log('Wake Lock error:', err);
+          }
+        }
+        
+        if (recognitionRef.current && !isPaused && !isMuted) {
           recognitionRef.current.start();
           setIsRecording(true);
         }
@@ -242,8 +267,11 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       if (recognitionRef.current) {
         recognitionRef.current.stop();
       }
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release();
+      }
     };
-  }, [sessionId, isPaused, toast, onBack]);
+  }, [sessionId, shouldStartRecording, isPaused, isMuted, toast, onBack]);
 
   // Track duration while recording
   useEffect(() => {
@@ -261,7 +289,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
 
   const togglePause = () => {
     if (isPaused) {
-      if (recognitionRef.current) {
+      if (recognitionRef.current && !isMuted) {
         try {
           recognitionRef.current.start();
         } catch (error) {
@@ -270,7 +298,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       }
       if (streamRef.current) {
         streamRef.current.getAudioTracks().forEach(track => {
-          track.enabled = true;
+          track.enabled = !isMuted;
         });
       }
       setIsPaused(false);
@@ -284,6 +312,36 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         });
       }
       setIsPaused(true);
+    }
+  };
+
+  const toggleMute = () => {
+    if (isMuted) {
+      // Unmute
+      if (streamRef.current) {
+        streamRef.current.getAudioTracks().forEach(track => {
+          track.enabled = !isPaused;
+        });
+      }
+      if (recognitionRef.current && !isPaused) {
+        try {
+          recognitionRef.current.start();
+        } catch (error) {
+          console.error('Error starting recognition:', error);
+        }
+      }
+      setIsMuted(false);
+    } else {
+      // Mute
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      if (streamRef.current) {
+        streamRef.current.getAudioTracks().forEach(track => {
+          track.enabled = false;
+        });
+      }
+      setIsMuted(true);
     }
   };
 
@@ -531,6 +589,25 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
             )}
           </Button>
           <Button
+            onClick={toggleMute}
+            size="lg"
+            variant="outline"
+            className="px-6"
+            disabled={isGeneratingProtocol || isPaused}
+          >
+            {isMuted ? (
+              <>
+                <MicOff className="mr-2 h-4 w-4" />
+                Slå på ljud
+              </>
+            ) : (
+              <>
+                <Mic className="mr-2 h-4 w-4" />
+                Tysta
+              </>
+            )}
+          </Button>
+          <Button
             onClick={saveToLibrary}
             size="lg"
             variant="default"
@@ -554,9 +631,15 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
 
         {/* Recording indicator */}
         <div className="mt-6 flex items-center gap-2 px-4 py-2 bg-primary/10 rounded-md">
-          <div className={`w-3 h-3 bg-primary rounded-full ${!isPaused && 'animate-pulse'}`} />
+          <div className={`w-3 h-3 bg-primary rounded-full ${!isPaused && !isMuted && 'animate-pulse'}`} />
           <span className="text-sm font-medium text-primary">
-            {isGeneratingProtocol ? "Genererar detaljerat protokoll med AI..." : isPaused ? "Pausad (mikrofon avstängd)" : "Spelar in..."}
+            {isGeneratingProtocol 
+              ? "Genererar detaljerat protokoll med AI..." 
+              : isPaused 
+              ? "Pausad (mikrofon avstängd)" 
+              : isMuted
+              ? "Tystad (ingen transkription)"
+              : "Spelar in..."}
           </span>
         </div>
       </div>
