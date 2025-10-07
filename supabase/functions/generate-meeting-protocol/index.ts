@@ -1,4 +1,3 @@
-// Groq AI Meeting Protocol Generator
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
@@ -21,16 +20,16 @@ serve(async (req) => {
       throw new Error('No transcript provided');
     }
 
-    const GROQ_API_KEY = Deno.env.get('GROQ_API_KEY');
-    if (!GROQ_API_KEY) {
-      throw new Error('GROQ_API_KEY not configured');
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+    if (!LOVABLE_API_KEY) {
+      throw new Error('LOVABLE_API_KEY not configured');
     }
 
-    console.log('Generating protocol with Groq AI...');
+    console.log('Generating protocol with Lovable AI...');
 
     const systemPrompt = `Du är en erfaren mötessekreterare som skapar DETALJERADE och PROFESSIONELLA mötesprotokoll på svenska.
 
-VIKTIGT: Du måste ALLTID ge ett komplett protokoll, även om transkriptionen är kort eller oklar!
+VIKTIGT: Du måste ALLTID ge ett komplett protokoll, även om transkriptionen är kort!
 
 Din uppgift:
 1. Skapa en BESKRIVANDE titel (max 60 tecken) baserat på vad som diskuterades
@@ -44,54 +43,79 @@ REGLER:
 - Var kreativ och tolka innehållet professionellt
 - Om något är otydligt, gör en kvalificerad tolkning
 - Skapa ALLTID minst 3-5 huvudpunkter, även från korta diskussioner
-- Om inga tydliga beslut finns, tolka vad som diskuterades som potentiella beslutspunkter
+- Om inga tydliga beslut finns, tolka vad som diskuterades som potentiella beslutspunkter`;
 
-Svara ENDAST med JSON i detta format:
-{
-  "title": "Beskrivande titel baserat på innehållet",
-  "summary": "Detaljerad sammanfattning i 3-5 meningar som fångar hela mötet",
-  "mainPoints": ["Huvudpunkt 1 med detaljer", "Huvudpunkt 2 med kontext", "Huvudpunkt 3...", "..."],
-  "decisions": ["Beslut 1 om det finns", "Beslut 2..."],
-  "actionItems": ["Uppgift 1 med ansvarig om möjligt", "Uppgift 2..."]
-}
-
-Ge ALDRIG tomma arrayer för mainPoints - det ska alltid finnas minst 3-5 punkter!`;
-
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${GROQ_API_KEY}`,
+        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'google/gemini-2.5-flash',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Analysera denna mötestranskription noggrant och skapa ett DETALJERAT protokoll:\n\n${transcript}\n\nKom ihåg: Ge ALLTID ett komplett protokoll med minst 3-5 huvudpunkter, även om transkriptionen är kort!` }
         ],
-        temperature: 0.7,
-        max_tokens: 3000,
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "create_meeting_protocol",
+              description: "Skapa ett strukturerat mötesprotokoll",
+              parameters: {
+                type: "object",
+                properties: {
+                  title: {
+                    type: "string",
+                    description: "Beskrivande titel baserat på innehållet (max 60 tecken)"
+                  },
+                  summary: {
+                    type: "string",
+                    description: "Detaljerad sammanfattning i 3-5 meningar"
+                  },
+                  mainPoints: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Lista med 5-10 huvudpunkter från mötet"
+                  },
+                  decisions: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Beslut som fattades under mötet"
+                  },
+                  actionItems: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Uppgifter och action items som ska genomföras"
+                  }
+                },
+                required: ["title", "summary", "mainPoints", "decisions", "actionItems"],
+                additionalProperties: false
+              }
+            }
+          }
+        ],
+        tool_choice: { type: "function", function: { name: "create_meeting_protocol" } }
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Groq API error:', response.status, errorText);
-      throw new Error(`Groq API error: ${response.status}`);
+      console.error('Lovable AI error:', response.status, errorText);
+      throw new Error(`Lovable AI error: ${response.status}`);
     }
 
     const data = await response.json();
-    const aiResponse = data.choices[0].message.content;
+    console.log('Full AI response:', JSON.stringify(data, null, 2));
     
-    console.log('AI Response:', aiResponse);
-
-    // Parse the JSON response
-    const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('Could not extract JSON from AI response');
+    const toolCall = data.choices[0].message.tool_calls?.[0];
+    if (!toolCall) {
+      throw new Error('No tool call in AI response');
     }
 
-    const protocol = JSON.parse(jsonMatch[0]);
+    const protocol = JSON.parse(toolCall.function.arguments);
+    console.log('Extracted protocol:', protocol);
 
     return new Response(
       JSON.stringify({ protocol }),

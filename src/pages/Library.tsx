@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useNavigate } from "react-router-dom";
-import { Play, Calendar, Trash2, FolderPlus, X, Edit2, Check, Folder } from "lucide-react";
+import { Play, Calendar, Trash2, FolderPlus, X, Edit2, Check, Folder, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { BottomNav } from "@/components/BottomNav";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -29,6 +29,7 @@ const Library = () => {
   const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [editingMeetingId, setEditingMeetingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [generatingProtocolId, setGeneratingProtocolId] = useState<string | null>(null);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -159,6 +160,52 @@ const Library = () => {
       title: "Flyttat",
       description: `Mötet har flyttats till "${newFolder}"`,
     });
+  };
+
+  const handleGenerateProtocol = async (meeting: Meeting) => {
+    setGeneratingProtocolId(meeting.id);
+    
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-meeting-protocol`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({ transcript: meeting.transcript }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to generate protocol');
+      }
+
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // Navigate to protocol view with the generated data
+      navigate('/', { 
+        state: { 
+          showProtocol: true,
+          transcript: meeting.transcript,
+          aiProtocol: data.protocol 
+        } 
+      });
+    } catch (error) {
+      console.error('Protocol generation failed:', error);
+      toast({
+        title: "Fel",
+        description: "Kunde inte generera protokoll. Försök igen.",
+        variant: "destructive",
+      });
+    } finally {
+      setGeneratingProtocolId(null);
+    }
   };
 
   const formatDate = (dateString: string) => {
@@ -327,6 +374,15 @@ const Library = () => {
                     >
                       <Play className="w-4 h-4 mr-1" />
                       Fortsätt
+                    </Button>
+                    <Button
+                      onClick={() => handleGenerateProtocol(meeting)}
+                      size="sm"
+                      variant="secondary"
+                      disabled={generatingProtocolId === meeting.id}
+                    >
+                      <FileText className="w-4 h-4 mr-1" />
+                      {generatingProtocolId === meeting.id ? "Genererar..." : "Skapa protokoll"}
                     </Button>
                     <Select value={meeting.folder} onValueChange={(value) => handleMoveToFolder(meeting, value)}>
                       <SelectTrigger className="w-[140px] h-9">

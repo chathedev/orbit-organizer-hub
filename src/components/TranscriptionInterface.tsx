@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { RecordingView } from "./RecordingView";
 import { AutoProtocolGenerator } from "./AutoProtocolGenerator";
+import { useLocation } from "react-router-dom";
 
 type View = "welcome" | "recording" | "protocol";
 
@@ -16,6 +17,7 @@ interface AIProtocol {
 }
 
 export const TranscriptionInterface = () => {
+  const location = useLocation();
   const [currentView, setCurrentView] = useState<View>("welcome");
   const [transcript, setTranscript] = useState("");
   const [aiProtocol, setAiProtocol] = useState<AIProtocol | null>(null);
@@ -27,6 +29,15 @@ export const TranscriptionInterface = () => {
       setCurrentView("recording");
     }
   }, []);
+
+  // Check for protocol data from library
+  useEffect(() => {
+    if (location.state?.showProtocol) {
+      setTranscript(location.state.transcript);
+      setAiProtocol(location.state.aiProtocol);
+      setCurrentView("protocol");
+    }
+  }, [location]);
 
   const handleStartRecording = () => {
     setCurrentView("recording");

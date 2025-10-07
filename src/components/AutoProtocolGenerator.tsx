@@ -331,15 +331,8 @@ export const AutoProtocolGenerator = ({ transcript, aiProtocol, onBack }: AutoPr
                       </div>
                     )}
 
-                    <div className="border-t pt-4" />
                   </>
                 )}
-
-                {/* Full Transcript */}
-                <div>
-                  <h4 className="text-lg font-bold mb-2">Fullständig transkription</h4>
-                  <p className="text-muted-foreground whitespace-pre-wrap">{transcript}</p>
-                </div>
               </CardContent>
             </Card>
 
