@@ -41,7 +41,15 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const wakeLockRef = useRef<any>(null);
   const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const { toast } = useToast();
+  const isPausedRef = useRef(false);
+  const isMutedRef = useRef(false);
+  const isRecordingRef = useRef(false);
+const { toast } = useToast();
+
+  // Keep refs in sync with state to avoid stale closures
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+  useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -61,6 +69,11 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     recognition.interimResults = true;
 
     recognition.onresult = (event: any) => {
+      // Ignore any results when paused or muted; clear interim immediately
+      if (isPausedRef.current || isMutedRef.current) {
+        setInterimTranscript('');
+        return;
+      }
       let interim = '';
       let final = '';
 
@@ -87,12 +100,12 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     recognition.onend = () => {
       console.log('Recognition ended');
       // Only restart if we're actually still recording and not paused/muted
-      if (isRecording && !isPaused && !isMuted && recognitionRef.current) {
+      if (isRecordingRef.current && !isPausedRef.current && !isMutedRef.current && recognitionRef.current) {
         if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
         restartTimeoutRef.current = setTimeout(() => {
           try {
             // Double check state before restarting
-            if (isRecording && !isPaused && !isMuted && recognitionRef.current) {
+            if (isRecordingRef.current && !isPausedRef.current && !isMutedRef.current && recognitionRef.current) {
               recognitionRef.current.start();
             }
           } catch (error) {
@@ -247,6 +260,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         if (recognitionRef.current && !isPaused && !isMuted) {
           recognitionRef.current.start();
           setIsRecording(true);
+          isRecordingRef.current = true;
         }
       } catch (error) {
         console.error("Kunde inte starta inspelning:", error);
@@ -266,11 +280,15 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
       if (recognitionRef.current) {
-        recognitionRef.current.stop();
+        try {
+          recognitionRef.current.stop();
+          if (recognitionRef.current.abort) recognitionRef.current.abort();
+        } catch (e) {}
       }
       if (wakeLockRef.current) {
         wakeLockRef.current.release();
       }
+      isRecordingRef.current = false;
     };
   }, [sessionId, shouldStartRecording, isPaused, isMuted, toast, onBack]);
 
@@ -291,13 +309,14 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   const togglePause = () => {
     if (isPaused) {
       // Resume
+      isPausedRef.current = false;
       setIsPaused(false);
-      if (streamRef.current && !isMuted) {
+      if (streamRef.current && !isMutedRef.current) {
         streamRef.current.getAudioTracks().forEach(track => {
           track.enabled = true;
         });
       }
-      if (recognitionRef.current && !isMuted) {
+      if (recognitionRef.current && !isMutedRef.current) {
         try {
           recognitionRef.current.start();
         } catch (error) {
@@ -306,13 +325,14 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       }
     } else {
       // Pause immediately
+      isPausedRef.current = true;
       setIsPaused(true);
       setInterimTranscript(''); // Clear interim immediately
       if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
-          recognitionRef.current.abort(); // Force immediate stop
+          if (recognitionRef.current.abort) recognitionRef.current.abort(); // Force immediate stop
         } catch (error) {
           console.error('Error pausing recognition:', error);
         }
@@ -328,13 +348,14 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
   const toggleMute = () => {
     if (isMuted) {
       // Unmute
+      isMutedRef.current = false;
       setIsMuted(false);
-      if (streamRef.current && !isPaused) {
+      if (streamRef.current && !isPausedRef.current) {
         streamRef.current.getAudioTracks().forEach(track => {
           track.enabled = true;
         });
       }
-      if (recognitionRef.current && !isPaused) {
+      if (recognitionRef.current && !isPausedRef.current) {
         try {
           recognitionRef.current.start();
         } catch (error) {
@@ -347,13 +368,14 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
       });
     } else {
       // Mute immediately - stop transcription completely
+      isMutedRef.current = true;
       setIsMuted(true);
       setInterimTranscript(''); // Clear interim immediately
       if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
-          recognitionRef.current.abort(); // Force immediate stop
+          if (recognitionRef.current.abort) recognitionRef.current.abort(); // Force immediate stop
         } catch (error) {
           console.error('Error stopping recognition:', error);
         }
@@ -412,9 +434,13 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
 
   const stopRecording = async () => {
     setIsRecording(false);
+    isRecordingRef.current = false;
     
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+        if (recognitionRef.current.abort) recognitionRef.current.abort();
+      } catch (e) {}
     }
     
     if (streamRef.current) {
@@ -661,7 +687,7 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
             {isGeneratingProtocol 
               ? "Genererar detaljerat protokoll med AI..." 
               : isPaused 
-              ? "Pausad (mikrofon avstängd)" 
+              ? "Pausad (ingen transkription)" 
               : isMuted
               ? "Tystad (ingen transkription)"
               : "Spelar in..."}

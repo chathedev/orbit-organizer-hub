@@ -321,7 +321,7 @@ const Library = () => {
                   </p>
                   <div className="flex gap-2 flex-wrap items-center">
                     <Button
-                      onClick={() => navigate("/?session=" + meeting.id)}
+                      onClick={() => navigate("/?session=" + meeting.id + "#auto")}
                       size="sm"
                       variant="default"
                     >
