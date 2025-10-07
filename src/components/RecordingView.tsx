@@ -331,10 +331,18 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         }
       }
       setIsMuted(false);
+      toast({
+        title: "Mikrofon påslagen",
+        description: "Transkribering återupptas",
+      });
     } else {
-      // Mute
+      // Mute - stop transcription completely
       if (recognitionRef.current) {
-        recognitionRef.current.stop();
+        try {
+          recognitionRef.current.stop();
+        } catch (error) {
+          console.error('Error stopping recognition:', error);
+        }
       }
       if (streamRef.current) {
         streamRef.current.getAudioTracks().forEach(track => {
@@ -342,6 +350,10 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
         });
       }
       setIsMuted(true);
+      toast({
+        title: "Mikrofon tystad",
+        description: "Transkribering pausad",
+      });
     }
   };
 

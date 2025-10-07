@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Mic, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -19,6 +19,14 @@ export const TranscriptionInterface = () => {
   const [currentView, setCurrentView] = useState<View>("welcome");
   const [transcript, setTranscript] = useState("");
   const [aiProtocol, setAiProtocol] = useState<AIProtocol | null>(null);
+
+  // Check for session parameter on mount and auto-start
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('session')) {
+      setCurrentView("recording");
+    }
+  }, []);
 
   const handleStartRecording = () => {
     setCurrentView("recording");
