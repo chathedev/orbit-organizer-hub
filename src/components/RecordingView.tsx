@@ -85,13 +85,14 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
     };
 
     recognition.onend = () => {
-      console.log('Recognition ended, restarting...');
+      console.log('Recognition ended');
+      // Only restart if we're actually still recording and not paused/muted
       if (isRecording && !isPaused && !isMuted && recognitionRef.current) {
-        // Add slight delay before restart to prevent rapid fire restarts
         if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
         restartTimeoutRef.current = setTimeout(() => {
           try {
-            if (recognitionRef.current && isRecording && !isPaused && !isMuted) {
+            // Double check state before restarting
+            if (isRecording && !isPaused && !isMuted && recognitionRef.current) {
               recognitionRef.current.start();
             }
           } catch (error) {
@@ -289,6 +290,13 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
 
   const togglePause = () => {
     if (isPaused) {
+      // Resume
+      setIsPaused(false);
+      if (streamRef.current && !isMuted) {
+        streamRef.current.getAudioTracks().forEach(track => {
+          track.enabled = true;
+        });
+      }
       if (recognitionRef.current && !isMuted) {
         try {
           recognitionRef.current.start();
@@ -296,31 +304,34 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
           console.error('Error resuming recognition:', error);
         }
       }
-      if (streamRef.current) {
-        streamRef.current.getAudioTracks().forEach(track => {
-          track.enabled = !isMuted;
-        });
-      }
-      setIsPaused(false);
     } else {
+      // Pause immediately
+      setIsPaused(true);
+      setInterimTranscript(''); // Clear interim immediately
+      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
       if (recognitionRef.current) {
-        recognitionRef.current.stop();
+        try {
+          recognitionRef.current.stop();
+          recognitionRef.current.abort(); // Force immediate stop
+        } catch (error) {
+          console.error('Error pausing recognition:', error);
+        }
       }
       if (streamRef.current) {
         streamRef.current.getAudioTracks().forEach(track => {
           track.enabled = false;
         });
       }
-      setIsPaused(true);
     }
   };
 
   const toggleMute = () => {
     if (isMuted) {
       // Unmute
-      if (streamRef.current) {
+      setIsMuted(false);
+      if (streamRef.current && !isPaused) {
         streamRef.current.getAudioTracks().forEach(track => {
-          track.enabled = !isPaused;
+          track.enabled = true;
         });
       }
       if (recognitionRef.current && !isPaused) {
@@ -330,16 +341,19 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
           console.error('Error starting recognition:', error);
         }
       }
-      setIsMuted(false);
       toast({
         title: "Mikrofon påslagen",
         description: "Transkribering återupptas",
       });
     } else {
-      // Mute - stop transcription completely
+      // Mute immediately - stop transcription completely
+      setIsMuted(true);
+      setInterimTranscript(''); // Clear interim immediately
+      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
+          recognitionRef.current.abort(); // Force immediate stop
         } catch (error) {
           console.error('Error stopping recognition:', error);
         }
@@ -349,10 +363,9 @@ export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
           track.enabled = false;
         });
       }
-      setIsMuted(true);
       toast({
         title: "Mikrofon tystad",
-        description: "Transkribering pausad",
+        description: "Transkribering stoppad",
       });
     }
   };
