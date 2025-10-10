@@ -1,55 +1,51 @@
 import { useState, useRef, useEffect } from "react";
-import { Square, FileText, Pause, Play, Edit2, Check, Mic, MicOff } from "lucide-react";
+import { Square, FileText, Pause, Play, Edit2, Check, MicOff, Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { VoiceVisualization } from "./VoiceVisualization";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
+import { useNavigate } from "react-router-dom";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useState as useStateHook, useEffect as useEffectHook } from "react";
-
-interface AIProtocol {
-  title: string;
-  summary: string;
-  mainPoints: string[];
-  decisions: string[];
-  actionItems: string[];
-}
 
 interface RecordingViewProps {
-  onFinish: (data: { transcript: string; aiProtocol: AIProtocol | null }) => void;
   onBack: () => void;
+  continuedMeeting?: any;
 }
 
-export const RecordingView = ({ onFinish, onBack }: RecordingViewProps) => {
+export const RecordingView = ({ onBack, continuedMeeting }: RecordingViewProps) => {
+  const navigate = useNavigate();
+  const { toast } = useToast();
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [transcript, setTranscript] = useState("");
+  const [isMuted, setIsMuted] = useState(!!continuedMeeting);
+  const [transcript, setTranscript] = useState(continuedMeeting?.transcript || "");
   const [interimTranscript, setInterimTranscript] = useState("");
-  const [isGeneratingProtocol, setIsGeneratingProtocol] = useState(false);
-  const [sessionId, setSessionId] = useState<string>("");
-  const [meetingName, setMeetingName] = useState("Namnlöst möte");
-  const [selectedFolder, setSelectedFolder] = useState("Allmänt");
+  const [sessionId, setSessionId] = useState<string>(continuedMeeting?.id || "");
+  const [meetingName, setMeetingName] = useState(continuedMeeting?.title || "Namnlöst möte");
+  const [selectedFolder, setSelectedFolder] = useState(continuedMeeting?.folder || "Allmänt");
   const [isEditingName, setIsEditingName] = useState(false);
-  const [hasSpoken, setHasSpoken] = useState(false);
-  const [durationSec, setDurationSec] = useState(0);
-  const [shouldStartRecording, setShouldStartRecording] = useState(false);
+  const [durationSec, setDurationSec] = useState(continuedMeeting?.duration_seconds || 0);
+  const [showShortTranscriptDialog, setShowShortTranscriptDialog] = useState(false);
+  const [showMaxDurationDialog, setShowMaxDurationDialog] = useState(false);
+  const MAX_DURATION_SECONDS = 7200;
   const recognitionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const wakeLockRef = useRef<any>(null);
-  const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isPausedRef = useRef(false);
-  const isMutedRef = useRef(false);
-  const isRecordingRef = useRef(false);
-const { toast } = useToast();
+  const isRecognitionActiveRef = useRef(false);
+  const transcriptViewRef = useRef<HTMLDivElement>(null);
+  const [folders, setFolders] = useState<string[]>(["Allmänt"]);
 
-  // Keep refs in sync with state to avoid stale closures
-  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
-  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
-  useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
+  useEffect(() => {
+    const loadFolders = async () => {
+      const { data } = await supabase.from('meeting_folders').select('name');
+      if (data && data.length > 0) {
+        setFolders(data.map(f => f.name));
+      }
+    };
+    loadFolders();
+  }, []);
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -69,11 +65,6 @@ const { toast } = useToast();
     recognition.interimResults = true;
 
     recognition.onresult = (event: any) => {
-      // Ignore any results when paused or muted; clear interim immediately
-      if (isPausedRef.current || isMutedRef.current) {
-        setInterimTranscript('');
-        return;
-      }
       let interim = '';
       let final = '';
 
@@ -89,7 +80,6 @@ const { toast } = useToast();
       if (final) {
         setTranscript(prev => prev + final);
         setInterimTranscript('');
-        setHasSpoken(true);
       }
       
       if (interim) {
@@ -98,30 +88,32 @@ const { toast } = useToast();
     };
 
     recognition.onend = () => {
-      console.log('Recognition ended');
-      // Only restart if we're actually still recording and not paused/muted
-      if (isRecordingRef.current && !isPausedRef.current && !isMutedRef.current && recognitionRef.current) {
-        if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
-        restartTimeoutRef.current = setTimeout(() => {
-          try {
-            // Double check state before restarting
-            if (isRecordingRef.current && !isPausedRef.current && !isMutedRef.current && recognitionRef.current) {
+      isRecognitionActiveRef.current = false;
+      
+      if (isRecording && !isPaused && !isMuted && recognitionRef.current) {
+        setTimeout(() => {
+          if (isRecording && !isPaused && !isMuted && recognitionRef.current && !isRecognitionActiveRef.current) {
+            try {
               recognitionRef.current.start();
+              isRecognitionActiveRef.current = true;
+            } catch (error: any) {
+              if (error.message?.includes('already started')) {
+                isRecognitionActiveRef.current = true;
+              }
             }
-          } catch (error) {
-            console.error('Error restarting recognition:', error);
           }
         }, 100);
       }
     };
 
     recognition.onerror = (event: any) => {
-      console.error('Taligenkänningsfel:', event.error);
+      isRecognitionActiveRef.current = false;
+      if (event.error === 'aborted') return;
+      
       if (event.error === 'no-speech') {
-        toast({
-          title: "Inget tal upptäckt",
-          description: "Försök prata lite högre.",
-        });
+        toast({ title: "Inget tal upptäckt", description: "Försök prata lite högre." });
+      } else if (event.error === 'audio-capture') {
+        toast({ title: "Mikrofonfel", description: "Kunde inte komma åt mikrofonen.", variant: "destructive" });
       }
     };
 
@@ -131,28 +123,11 @@ const { toast } = useToast();
       if (recognitionRef.current) {
         recognitionRef.current.stop();
       }
-      if (restartTimeoutRef.current) {
-        clearTimeout(restartTimeoutRef.current);
-      }
     };
   }, [toast, isPaused, isMuted, isRecording]);
 
-  // Load available folders
-  const [folders, setFolders] = useState<string[]>([]);
-  
   useEffect(() => {
-    const loadFolders = async () => {
-      const { data } = await supabase.from('meeting_folders').select('name').order('name');
-      if (data) {
-        setFolders(data.map(f => f.name));
-      }
-    };
-    loadFolders();
-  }, []);
-
-  // Auto-save to database
-  useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !transcript.trim()) return;
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -161,79 +136,60 @@ const { toast } = useToast();
     saveTimeoutRef.current = setTimeout(async () => {
       await supabase
         .from('meeting_sessions')
-        .update({
+        .upsert({
+          id: sessionId,
           name: meetingName,
           folder: selectedFolder,
           transcript,
           interim_transcript: interimTranscript,
-          is_paused: isPaused,
           duration_seconds: durationSec,
-        })
-        .eq('id', sessionId);
-    }, 1000);
+          updated_at: new Date().toISOString(),
+        });
+    }, 1500);
 
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [transcript, interimTranscript, isPaused, durationSec, sessionId, meetingName, selectedFolder]);
+  }, [transcript, meetingName, selectedFolder, sessionId, durationSec, interimTranscript]);
 
-  // Load or create session from database
+  useEffect(() => {
+    const el = transcriptViewRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [transcript, interimTranscript]);
+
   useEffect(() => {
     const initSession = async () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const existingSessionId = urlParams.get('session');
-
-      if (existingSessionId) {
-        const { data: existing } = await supabase
-          .from('meeting_sessions')
-          .select('*')
-          .eq('id', existingSessionId)
-          .single();
-          
-        if (existing) {
-          setSessionId(existing.id);
-          setMeetingName(existing.name || 'Namnlöst möte');
-          setSelectedFolder(existing.folder || 'Allmänt');
-          setTranscript(existing.transcript || '');
-          setInterimTranscript(existing.interim_transcript || '');
-          setIsPaused(false); // Auto-start when continuing
-          setDurationSec(existing.duration_seconds || 0);
-          setShouldStartRecording(true); // Flag to auto-start
-          toast({
-            title: "Möte återställt",
-            description: `Fortsätter "${existing.name}"`,
-          });
-          window.history.replaceState({}, '', '/');
-          return;
-        }
+      if (continuedMeeting) {
+        setSessionId(continuedMeeting.id);
+        setSelectedFolder(continuedMeeting.folder);
+        return;
       }
 
-      // Create new session and auto-start
-      const { data: newSession } = await supabase
+      if (sessionId) return;
+
+      const { data, error } = await supabase
         .from('meeting_sessions')
         .insert({
           name: 'Namnlöst möte',
           folder: 'Allmänt',
           transcript: '',
           interim_transcript: '',
-          is_paused: false,
         })
         .select()
         .single();
-        
-      if (newSession) {
-        setSessionId(newSession.id);
-        setShouldStartRecording(true);
+
+      if (data && !error) {
+        setSessionId(data.id);
       }
     };
 
     initSession();
-  }, [toast]);
+  }, [continuedMeeting, sessionId]);
 
   useEffect(() => {
-    if (!sessionId || !shouldStartRecording) return;
+    if (!sessionId) return;
 
     const startRecording = async () => {
       try {
@@ -247,28 +203,22 @@ const { toast } = useToast();
 
         streamRef.current = stream;
         
-        // Request wake lock to keep screen on
-        if ('wakeLock' in navigator) {
+        if (recognitionRef.current && !isPaused && !isMuted && !isRecognitionActiveRef.current) {
           try {
-            wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
-            console.log('Wake Lock activated');
-          } catch (err) {
-            console.log('Wake Lock error:', err);
+            recognitionRef.current.start();
+            isRecognitionActiveRef.current = true;
+            setIsRecording(true);
+          } catch (error: any) {
+            if (error.message?.includes('already started')) {
+              isRecognitionActiveRef.current = true;
+            }
+            setIsRecording(true);
           }
-        }
-        
-        if (recognitionRef.current && !isPaused && !isMuted) {
-          recognitionRef.current.start();
+        } else {
           setIsRecording(true);
-          isRecordingRef.current = true;
         }
       } catch (error) {
-        console.error("Kunde inte starta inspelning:", error);
-        toast({
-          title: "Fel",
-          description: "Kunde inte komma åt mikrofonen",
-          variant: "destructive",
-        });
+        toast({ title: "Fel", description: "Kunde inte komma åt mikrofonen", variant: "destructive" });
         onBack();
       }
     };
@@ -280,276 +230,216 @@ const { toast } = useToast();
         streamRef.current.getTracks().forEach(track => track.stop());
       }
       if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-          if (recognitionRef.current.abort) recognitionRef.current.abort();
-        } catch (e) {}
+        recognitionRef.current.stop();
       }
-      if (wakeLockRef.current) {
-        wakeLockRef.current.release();
-      }
-      isRecordingRef.current = false;
     };
-  }, [sessionId, shouldStartRecording, isPaused, isMuted, toast, onBack]);
+  }, [sessionId, isPaused, isMuted, toast, onBack, isRecording]);
 
-  // Track duration while recording
   useEffect(() => {
     if (isRecording && !isPaused) {
       if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
-      durationIntervalRef.current = setInterval(() => setDurationSec((s) => s + 1), 1000);
+      durationIntervalRef.current = setInterval(() => {
+        setDurationSec((s) => {
+          const newDuration = s + 1;
+          if (newDuration >= MAX_DURATION_SECONDS) {
+            setShowMaxDurationDialog(true);
+            stopRecording();
+          }
+          return newDuration;
+        });
+      }, 1000);
     } else {
-      if (durationIntervalRef.current) { clearInterval(durationIntervalRef.current); durationIntervalRef.current = null; }
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
+      }
     }
     return () => {
-      if (durationIntervalRef.current) { clearInterval(durationIntervalRef.current); durationIntervalRef.current = null; }
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
+      }
     };
   }, [isRecording, isPaused]);
 
-
-  const togglePause = () => {
-    if (isPaused) {
-      // Resume
-      isPausedRef.current = false;
-      setIsPaused(false);
-      if (streamRef.current && !isMutedRef.current) {
-        streamRef.current.getAudioTracks().forEach(track => {
-          track.enabled = true;
-        });
-      }
-      if (recognitionRef.current && !isMutedRef.current) {
-        try {
-          recognitionRef.current.start();
-        } catch (error) {
-          console.error('Error resuming recognition:', error);
-        }
+  const toggleMute = () => {
+    if (isMuted) {
+      setIsMuted(false);
+      if (recognitionRef.current && !isRecognitionActiveRef.current) {
+        setTimeout(() => {
+          if (recognitionRef.current && !isRecognitionActiveRef.current && !isMuted) {
+            try {
+              recognitionRef.current.start();
+              isRecognitionActiveRef.current = true;
+            } catch (error: any) {
+              if (error.message?.includes('already started')) {
+                isRecognitionActiveRef.current = true;
+              }
+            }
+          }
+        }, 100);
       }
     } else {
-      // Pause immediately
-      isPausedRef.current = true;
-      setIsPaused(true);
-      setInterimTranscript(''); // Clear interim immediately
-      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-          if (recognitionRef.current.abort) recognitionRef.current.abort(); // Force immediate stop
-        } catch (error) {
-          console.error('Error pausing recognition:', error);
-        }
+      if (recognitionRef.current && isRecognitionActiveRef.current) {
+        recognitionRef.current.stop();
+        isRecognitionActiveRef.current = false;
       }
-      if (streamRef.current) {
-        streamRef.current.getAudioTracks().forEach(track => {
-          track.enabled = false;
-        });
-      }
+      setIsMuted(true);
     }
   };
 
-  const toggleMute = () => {
-    if (isMuted) {
-      // Unmute
-      isMutedRef.current = false;
-      setIsMuted(false);
-      if (streamRef.current && !isPausedRef.current) {
+  const togglePause = () => {
+    if (isPaused) {
+      setIsPaused(false);
+      if (recognitionRef.current && !isMuted && !isRecognitionActiveRef.current) {
+        setTimeout(() => {
+          if (recognitionRef.current && !isMuted && !isRecognitionActiveRef.current && !isPaused) {
+            try {
+              recognitionRef.current.start();
+              isRecognitionActiveRef.current = true;
+            } catch (error: any) {
+              if (error.message?.includes('already started')) {
+                isRecognitionActiveRef.current = true;
+              }
+            }
+          }
+        }, 100);
+      }
+      if (streamRef.current) {
         streamRef.current.getAudioTracks().forEach(track => {
           track.enabled = true;
         });
       }
-      if (recognitionRef.current && !isPausedRef.current) {
-        try {
-          recognitionRef.current.start();
-        } catch (error) {
-          console.error('Error starting recognition:', error);
-        }
-      }
-      toast({
-        title: "Mikrofon påslagen",
-        description: "Transkribering återupptas",
-      });
     } else {
-      // Mute immediately - stop transcription completely
-      isMutedRef.current = true;
-      setIsMuted(true);
-      setInterimTranscript(''); // Clear interim immediately
-      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-          if (recognitionRef.current.abort) recognitionRef.current.abort(); // Force immediate stop
-        } catch (error) {
-          console.error('Error stopping recognition:', error);
-        }
+      if (recognitionRef.current && isRecognitionActiveRef.current) {
+        recognitionRef.current.stop();
+        isRecognitionActiveRef.current = false;
       }
       if (streamRef.current) {
         streamRef.current.getAudioTracks().forEach(track => {
           track.enabled = false;
         });
       }
-      toast({
-        title: "Mikrofon tystad",
-        description: "Transkribering stoppad",
-      });
+      setIsPaused(true);
     }
   };
 
   const saveToLibrary = async () => {
     const fullTranscript = transcript + interimTranscript;
     
-    if (!fullTranscript.trim()) {
-      toast({
-        title: "Ingen text",
-        description: "Ingen transkription inspelad än.",
-        variant: "destructive",
-      });
+    if (!fullTranscript.trim() || !sessionId) {
+      toast({ title: "Ingen text", description: "Ingen transkription inspelad än.", variant: "destructive" });
       return;
     }
     
-    // Save to database
-    const { error } = await supabase
-      .from('meeting_sessions')
-      .update({
-        name: meetingName,
-        folder: selectedFolder,
-        transcript: fullTranscript,
-        interim_transcript: '',
-        is_paused: true,
-        duration_seconds: durationSec,
-      })
-      .eq('id', sessionId);
-
-    if (error) {
-      console.error('Error saving to library:', error);
-      toast({
-        title: "Fel vid sparning",
-        description: "Kunde inte spara till biblioteket. Försök igen.",
-        variant: "destructive",
-      });
-    } else {
-      toast({
-        title: "Sparat!",
-        description: `"${meetingName}" har sparats i biblioteket under ${selectedFolder}.`,
-      });
-    }
-  };
-
-  const stopRecording = async () => {
     setIsRecording(false);
-    isRecordingRef.current = false;
-    
     if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-        if (recognitionRef.current.abort) recognitionRef.current.abort();
-      } catch (e) {}
+      recognitionRef.current.stop();
+      isRecognitionActiveRef.current = false;
     }
-    
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
     
-    const fullTranscript = transcript + interimTranscript;
-    
-    if (!fullTranscript.trim()) {
-      if (sessionId) {
-        await supabase.from('meeting_sessions').delete().eq('id', sessionId);
-      }
-      toast({
-        title: "Ingen text",
-        description: "Ingen transkription inspelad.",
-        variant: "destructive",
-      });
-      onBack();
-      return;
-    }
-    
-    // Final save
     await supabase
       .from('meeting_sessions')
       .update({
         name: meetingName,
         folder: selectedFolder,
         transcript: fullTranscript,
-        interim_transcript: '',
-        is_paused: false,
         duration_seconds: durationSec,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', sessionId);
+    
+    toast({ title: "Sparat!", description: `"${meetingName}" har sparats i biblioteket.` });
+    onBack();
+  };
+
+  const stopRecording = async () => {
+    const fullTranscript = (transcript + interimTranscript).trim();
+
+    if (!fullTranscript) {
+      toast({ title: "Ingen text", description: "Ingen transkription inspelad.", variant: "destructive" });
+      onBack();
+      return;
+    }
+
+    const wordCount = fullTranscript.split(/\s+/).length;
+    if (wordCount < 30) {
+      setShowShortTranscriptDialog(true);
+      return;
+    }
+
+    proceedToProtocol(fullTranscript);
+  };
+
+  const proceedToProtocol = async (fullTranscript: string) => {
+    setIsRecording(false);
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch {}
+      isRecognitionActiveRef.current = false;
+    }
+    if (streamRef.current) {
+      try { streamRef.current.getTracks().forEach(track => track.stop()); } catch {}
+      streamRef.current = null;
+    }
+
+    await supabase
+      .from('meeting_sessions')
+      .update({
+        name: meetingName,
+        folder: selectedFolder,
+        transcript: fullTranscript,
+        duration_seconds: durationSec,
+        updated_at: new Date().toISOString(),
       })
       .eq('id', sessionId);
 
-    // Generate AI protocol
-    setIsGeneratingProtocol(true);
-    
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-meeting-protocol`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({ transcript: fullTranscript }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error('Failed to generate protocol');
+    navigate('/protocol', {
+      state: {
+        transcript: fullTranscript,
+        meetingName,
+        meetingId: sessionId,
       }
-
-      const data = await response.json();
-      
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      // Pass AI-generated protocol to next view
-      onFinish({ 
-        transcript: fullTranscript, 
-        aiProtocol: data.protocol 
-      });
-    } catch (error) {
-      console.error('AI protocol generation failed:', error);
-      
-      toast({
-        title: "AI-generering misslyckades",
-        description: "Skapar enkelt protokoll med transkription...",
-        variant: "default",
-      });
-
-      // Fallback: continue without AI protocol
-      onFinish({ 
-        transcript: fullTranscript, 
-        aiProtocol: null 
-      });
-    } finally {
-      setIsGeneratingProtocol(false);
-    }
+    });
   };
 
-
-  const getFoldersSync = () => folders;
+  const proceedWithShortTranscript = () => {
+    setShowShortTranscriptDialog(false);
+    proceedToProtocol(transcript + interimTranscript);
+  };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col pb-20">
-      {/* Header */}
-      <div className="border-b border-border bg-card">
-        <div className="max-w-4xl mx-auto px-4 py-6">
-          <h1 className="text-2xl font-bold text-card-foreground">
-            {isPaused ? "Möte pausat" : "Spelar in möte"}
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {isPaused ? "Tryck återuppta för att fortsätta" : "Prata fritt • Texten visas direkt i realtid"}
-          </p>
+    <div className="min-h-screen bg-background flex flex-col pb-28">
+      <div className="border-b border-border bg-card/50 backdrop-blur sticky top-0 z-10">
+        <div className="max-w-5xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-xl font-semibold text-foreground">Mötesinspelning</h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {Math.floor(durationSec / 60)}:{(durationSec % 60).toString().padStart(2, '0')} • {(() => {
+                  const combined = `${transcript} ${interimTranscript}`.trim();
+                  return combined ? combined.split(/\s+/).length : 0;
+                })()} ord
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className={`w-3 h-3 rounded-full ${!isPaused && !isMuted ? 'bg-red-500 animate-pulse' : 'bg-muted'}`} />
+              <span className="text-sm text-muted-foreground">
+                {isMuted ? 'Avstängd' : isPaused ? 'Pausad' : 'Spelar in'}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 flex flex-col items-center p-8 max-w-4xl mx-auto w-full">
-        {/* Meeting Info */}
-        <div className="w-full bg-card rounded-lg border border-border p-4 mb-6">
-          <div className="flex gap-4 items-center flex-wrap">
-            <div className="flex-1 min-w-[200px]">
-              <label className="text-xs text-muted-foreground mb-1 block">Mötesnamn</label>
+      <div className="flex-1 flex flex-col max-w-5xl mx-auto w-full p-4 md:p-6 gap-4">
+        <div className="bg-card rounded-lg border border-border p-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Mötesnamn</label>
               {isEditingName ? (
                 <div className="flex gap-2">
                   <Input
@@ -558,30 +448,25 @@ const { toast } = useToast();
                     onBlur={() => setIsEditingName(false)}
                     onKeyDown={(e) => e.key === "Enter" && setIsEditingName(false)}
                     autoFocus
-                    className="h-9"
+                    className="h-8 text-sm"
                   />
-                  <Button onClick={() => setIsEditingName(false)} size="sm">
-                    <Check className="w-4 h-4" />
+                  <Button onClick={() => setIsEditingName(false)} size="sm" className="h-8">
+                    <Check className="w-3.5 h-3.5" />
                   </Button>
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">{meetingName}</span>
-                  <Button
-                    onClick={() => setIsEditingName(true)}
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 p-0"
-                  >
+                  <span className="text-sm font-medium truncate">{meetingName}</span>
+                  <Button onClick={() => setIsEditingName(true)} variant="ghost" size="sm" className="h-6 w-6 p-0">
                     <Edit2 className="w-3 h-3" />
                   </Button>
                 </div>
               )}
             </div>
-            <div className="min-w-[160px]">
-              <label className="text-xs text-muted-foreground mb-1 block">Mapp</label>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Mapp</label>
               <Select value={selectedFolder} onValueChange={setSelectedFolder}>
-                <SelectTrigger className="h-9">
+                <SelectTrigger className="h-8 text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -592,108 +477,98 @@ const { toast } = useToast();
               </Select>
             </div>
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Varaktighet</label>
-              <span className="text-sm font-medium block">
-                {Math.floor(durationSec / 60)}:{(durationSec % 60).toString().padStart(2, '0')}
-              </span>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Status</label>
+              <div className="flex items-center gap-2 h-8">
+                {(() => {
+                  const combined = `${transcript} ${interimTranscript}`.trim();
+                  const words = combined ? combined.split(/\s+/) : [];
+                  const count = words.length;
+                  if (count < 30) return <span className="text-xs text-yellow-600 dark:text-yellow-500">Behöver mer innehåll</span>;
+                  if (count < 50) return <span className="text-xs text-blue-600 dark:text-blue-400">Bra längd</span>;
+                  return <span className="text-xs text-green-600 dark:text-green-500">Utmärkt längd</span>;
+                })()}
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Real-time transcript display */}
-        <div className="w-full bg-card rounded-lg border border-border p-6 mb-8 min-h-[300px] max-h-[500px] overflow-y-auto">
-          <h2 className="text-lg font-semibold text-card-foreground mb-4 flex items-center gap-2">
-            <FileText className="w-5 h-5" />
-            Transkription (realtid)
-          </h2>
-          {transcript || interimTranscript ? (
-            <p className="text-base text-muted-foreground leading-relaxed whitespace-pre-wrap">
-              {transcript}
-              <span className="opacity-60">{interimTranscript}</span>
-            </p>
-          ) : (
-            <p className="text-sm text-muted-foreground/60 italic">
-              Börja prata så visas texten här direkt...
-            </p>
-          )}
+        <div className="flex-1 bg-card rounded-lg border border-border flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30">
+            <h3 className="text-sm font-medium">Live-transkription</h3>
+            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+              <span>{(() => {
+                const combined = `${transcript} ${interimTranscript}`.trim();
+                return combined ? combined.split(/\s+/).length : 0;
+              })()} ord</span>
+              <span>{new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}</span>
+            </div>
+          </div>
+          <div ref={transcriptViewRef} className="flex-1 overflow-y-auto p-6">
+            {transcript.trim() ? (
+              <p className="text-sm leading-relaxed whitespace-pre-wrap">{transcript.trim()}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">Börja prata för att se texten här i realtid…</p>
+            )}
+            {interimTranscript && (
+              <p className="text-sm leading-relaxed text-muted-foreground italic mt-2 animate-fade-in">
+                {interimTranscript}<span className="opacity-50 ml-1">▍</span>
+              </p>
+            )}
+          </div>
         </div>
 
-        {/* Control buttons */}
-        <div className="flex gap-3 flex-wrap justify-center">
-          <Button
-            onClick={togglePause}
-            size="lg"
-            variant="secondary"
-            className="px-6"
-            disabled={isGeneratingProtocol}
-          >
-            {isPaused ? (
-              <>
-                <Play className="mr-2 h-4 w-4" />
-                Återuppta
-              </>
-            ) : (
-              <>
-                <Pause className="mr-2 h-4 w-4" />
-                Pausa
-              </>
-            )}
-          </Button>
-          <Button
-            onClick={toggleMute}
-            size="lg"
-            variant="outline"
-            className="px-6"
-            disabled={isGeneratingProtocol || isPaused}
-          >
-            {isMuted ? (
-              <>
-                <MicOff className="mr-2 h-4 w-4" />
-                Slå på ljud
-              </>
-            ) : (
-              <>
-                <Mic className="mr-2 h-4 w-4" />
-                Tysta
-              </>
-            )}
-          </Button>
-          <Button
-            onClick={saveToLibrary}
-            size="lg"
-            variant="default"
-            className="px-6"
-            disabled={isGeneratingProtocol || !hasSpoken || !isPaused}
-          >
-            <FileText className="mr-2 h-4 w-4" />
-            Spara i bibliotek
-          </Button>
-          <Button
-            onClick={stopRecording}
-            size="lg"
-            variant="destructive"
-            className="px-6"
-            disabled={isGeneratingProtocol}
-          >
-            <Square className="mr-2 h-4 w-4" />
-            {isGeneratingProtocol ? "Genererar..." : "Stoppa & skapa protokoll"}
-          </Button>
-        </div>
-
-        {/* Recording indicator */}
-        <div className="mt-6 flex items-center gap-2 px-4 py-2 bg-primary/10 rounded-md">
-          <div className={`w-3 h-3 bg-primary rounded-full ${!isPaused && !isMuted && 'animate-pulse'}`} />
-          <span className="text-sm font-medium text-primary">
-            {isGeneratingProtocol 
-              ? "Genererar detaljerat protokoll med AI..." 
-              : isPaused 
-              ? "Pausad (ingen transkription)" 
-              : isMuted
-              ? "Tystad (ingen transkription)"
-              : "Spelar in..."}
-          </span>
+        <div className="sticky bottom-20 z-40 bg-background/95 backdrop-blur border-t border-border p-4 -mx-4 md:-mx-6">
+          <div className="flex gap-2 flex-wrap justify-center max-w-3xl mx-auto">
+            <Button onClick={toggleMute} size="default" variant={isMuted ? "destructive" : "outline"} className="flex-1 min-w-[140px]">
+              {isMuted ? (
+                <><MicOff className="mr-2 h-4 w-4" />Mikrofon av</>
+              ) : (
+                <><Mic className="mr-2 h-4 w-4" />Spelar in</>
+              )}
+            </Button>
+            <Button onClick={togglePause} size="default" variant="outline" className="flex-1 min-w-[140px]" disabled={isMuted}>
+              {isPaused ? (
+                <><Play className="mr-2 h-4 w-4" />Återuppta</>
+              ) : (
+                <><Pause className="mr-2 h-4 w-4" />Pausa</>
+              )}
+            </Button>
+            <Button onClick={saveToLibrary} size="default" variant="outline" className="flex-1 min-w-[140px]" disabled={!isPaused}>
+              <FileText className="mr-2 h-4 w-4" />Spara
+            </Button>
+            <Button onClick={stopRecording} size="default" variant="destructive" className="flex-1 min-w-[200px]">
+              <Square className="mr-2 h-4 w-4" />Stoppa & skapa protokoll
+            </Button>
+          </div>
         </div>
       </div>
+
+      <AlertDialog open={showShortTranscriptDialog} onOpenChange={setShowShortTranscriptDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Kort transkription</AlertDialogTitle>
+            <AlertDialogDescription>
+              Din transkription är väldigt kort (under 30 ord). AI-protokollet fungerar bäst med 50+ ord.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowShortTranscriptDialog(false)}>Fortsätt spela in</AlertDialogCancel>
+            <AlertDialogAction onClick={proceedWithShortTranscript}>Generera protokoll nu</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showMaxDurationDialog} onOpenChange={setShowMaxDurationDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Maximal inspelningstid nådd</AlertDialogTitle>
+            <AlertDialogDescription>Du har nått maximal inspelningstid på 2 timmar.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => { setShowMaxDurationDialog(false); onBack(); }}>OK</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

@@ -52,7 +52,7 @@ REGLER:
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: 'google/gemini-2.5-flash-lite',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Analysera denna mötestranskription noggrant och skapa ett DETALJERAT protokoll:\n\n${transcript}\n\nKom ihåg: Ge ALLTID ett komplett protokoll med minst 3-5 huvudpunkter, även om transkriptionen är kort!` }

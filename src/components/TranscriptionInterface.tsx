@@ -58,7 +58,6 @@ export const TranscriptionInterface = () => {
   if (currentView === "recording") {
     return (
       <RecordingView
-        onFinish={handleFinishRecording}
         onBack={handleBackToWelcome}
       />
     );

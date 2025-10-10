@@ -8,8 +8,6 @@ import { Play, Calendar, Trash2, FolderPlus, X, Edit2, Check, Folder, FileText, 
 import { useToast } from "@/hooks/use-toast";
 import { BottomNav } from "@/components/BottomNav";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface Meeting {
   id: string;
@@ -32,7 +30,6 @@ const Library = () => {
   const [editingMeetingId, setEditingMeetingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [generatingProtocolId, setGeneratingProtocolId] = useState<string | null>(null);
-  const [viewingTranscript, setViewingTranscript] = useState<Meeting | null>(null);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -388,7 +385,7 @@ const Library = () => {
                       {generatingProtocolId === meeting.id ? "Genererar..." : "Skapa protokoll"}
                     </Button>
                     <Button
-                      onClick={() => setViewingTranscript(meeting)}
+                      onClick={() => navigate('/transcript', { state: { meeting } })}
                       size="sm"
                       variant="outline"
                     >
@@ -426,22 +423,6 @@ const Library = () => {
         )}
       </div>
 
-      {/* Transcript Dialog */}
-      <Dialog open={!!viewingTranscript} onOpenChange={(open) => !open && setViewingTranscript(null)}>
-        <DialogContent className="max-w-3xl max-h-[80vh]">
-          <DialogHeader>
-            <DialogTitle>{viewingTranscript?.name}</DialogTitle>
-            <DialogDescription>
-              {viewingTranscript && formatDate(viewingTranscript.updated_at)} • {viewingTranscript && formatDuration(viewingTranscript.duration_seconds)}
-            </DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="h-[60vh] pr-4">
-            <p className="text-base text-muted-foreground whitespace-pre-wrap leading-relaxed">
-              {viewingTranscript?.transcript || viewingTranscript?.interim_transcript || "Ingen transkription tillgänglig"}
-            </p>
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
 
       <BottomNav />
     </div>
