@@ -5,8 +5,8 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
-import { useNavigate } from "react-router-dom";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ProtocolDialog } from "./ProtocolDialog";
 
 interface RecordingViewProps {
   onBack: () => void;
@@ -14,7 +14,6 @@ interface RecordingViewProps {
 }
 
 export const RecordingView = ({ onBack, continuedMeeting }: RecordingViewProps) => {
-  const navigate = useNavigate();
   const { toast } = useToast();
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -28,6 +27,7 @@ export const RecordingView = ({ onBack, continuedMeeting }: RecordingViewProps) 
   const [durationSec, setDurationSec] = useState(continuedMeeting?.duration_seconds || 0);
   const [showShortTranscriptDialog, setShowShortTranscriptDialog] = useState(false);
   const [showMaxDurationDialog, setShowMaxDurationDialog] = useState(false);
+  const [showProtocolDialog, setShowProtocolDialog] = useState(false);
   const MAX_DURATION_SECONDS = 7200;
   const recognitionRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -397,13 +397,7 @@ export const RecordingView = ({ onBack, continuedMeeting }: RecordingViewProps) 
       })
       .eq('id', sessionId);
 
-    navigate('/protocol', {
-      state: {
-        transcript: fullTranscript,
-        meetingName,
-        meetingId: sessionId,
-      }
-    });
+    setShowProtocolDialog(true);
   };
 
   const proceedWithShortTranscript = () => {
@@ -569,6 +563,16 @@ export const RecordingView = ({ onBack, continuedMeeting }: RecordingViewProps) 
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ProtocolDialog
+        open={showProtocolDialog}
+        onOpenChange={(open) => {
+          setShowProtocolDialog(open);
+          if (!open) onBack();
+        }}
+        transcript={transcript + interimTranscript}
+        meetingName={meetingName}
+      />
     </div>
   );
 };
